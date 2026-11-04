@@ -1,0 +1,35 @@
+# Account credentials and local sessions
+.env
+.env.*
+!.env.example
+.session/
+.secrets/
+cookies.json
+cookies.txt
+*.binarycookies
+
+# Personal listening data and exports
+/data/
+/raw/
+/exports/
+/outputs/
+/work/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Dependencies, build products and caches
+node_modules/
+.pnpm-store/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+coverage/
+*.log
+.DS_Store
