@@ -21,7 +21,7 @@ class SyncManager:
     def start(self, account, limit=200, playlists=True, retry_empty=False):
         with self.lock:
             if self.thread and self.thread.is_alive():
-                raise ValueError("已有采集任务正在进行")
+                raise ValueError("已经有一个同步任务在进行")
             self.stop.clear()
             self.uid = account["uid"]
             run_id = self.store.new_run(self.uid)
@@ -45,18 +45,18 @@ class SyncManager:
             ("喜欢的歌曲", "likelist", {"uid": uid}, lambda b: [{"id": str(i)} for i in b.get("ids", [])]),
         ]
         for label, method, query, extract in sources:
-            self.store.update_run(run_id, phase="发现歌曲 · " + label)
+            self.store.update_run(run_id, phase="查找歌曲 · " + label)
             try:
                 self.store.candidates(uid, extract(self.request(method, **query)), label)
             except ApiError as err:
                 if err.code in (301, 401, 403, 429, 460):
                     raise
-                warnings.append(label + "读取失败")
+                warnings.append(label + "没能读取")
         if playlists:
             offset = 0
             visited = set()
             while True:
-                self.store.update_run(run_id, phase="发现歌曲 · 我的歌单")
+                self.store.update_run(run_id, phase="查找歌曲 · 我的歌单")
                 try:
                     body = self.request("user_playlist", uid=uid, offset=offset, limit=100)
                     lists = body.get("playlist") or []
@@ -65,7 +65,7 @@ class SyncManager:
                         if pid in visited or str((playlist.get("creator") or {}).get("userId")) != str(uid):
                             continue
                         visited.add(pid)
-                        self.store.update_run(run_id, phase="发现歌曲 · " + (playlist.get("name") or "歌单")[:40])
+                        self.store.update_run(run_id, phase="查找歌曲 · " + (playlist.get("name") or "歌单")[:40])
                         try:
                             detail = self.request("playlist_detail", id=pid).get("playlist") or {}
                             self.store.candidates(uid, [song_metadata(s) for s in detail.get("tracks", [])], "我的歌单")
@@ -73,17 +73,17 @@ class SyncManager:
                         except ApiError as err:
                             if err.code in (301, 401, 403, 429, 460):
                                 raise
-                            warnings.append("部分歌单读取失败")
+                            warnings.append("部分歌单没能读取")
                     if not body.get("more") or not lists:
                         break
                     offset += len(lists)
                     if offset >= 10000:
-                        warnings.append("歌单列表超过单次发现范围，需单独导入")
+                        warnings.append("歌单数量超过单次上限，其余歌单这次没有读取")
                         break
                 except ApiError as err:
                     if err.code in (301, 401, 403, 429, 460):
                         raise
-                    warnings.append("歌单列表读取失败")
+                    warnings.append("歌单列表没能读取")
                     break
         return warnings
 
@@ -93,7 +93,7 @@ class SyncManager:
         try:
             current = self.client.login()
             if current["uid"] != uid:
-                raise ApiError("账号已变更，请重新连接后采集")
+                raise ApiError("登录的账号已切换，请重新连接后再同步")
             warnings = self.discover(uid, run_id, playlists)
             queue = self.store.pending(uid, retry_empty=retry_empty, limit=limit or 1000000)
             consecutive_errors = 0
@@ -110,7 +110,7 @@ class SyncManager:
                         except ApiError as err:
                             if err.code in (301, 401, 403, 429, 460):
                                 raise
-                self.store.update_run(run_id, phase="查询首次播放 · %s / %s" % (index + 1, len(queue)))
+                self.store.update_run(run_id, phase="查询初听时间 · %s / %s" % (index + 1, len(queue)))
                 try:
                     body = self.request("music_first_listen_info", id=song["song_id"])
                     result = self.store.save_result(uid, song["song_id"], body)
@@ -121,19 +121,19 @@ class SyncManager:
                     counts["failed"] += 1
                     consecutive_errors += 1
                     if isinstance(err, ApiError) and err.code in (301, 401, 403, 429, 460):
-                        raise ApiError("登录或请求受到限制，已停止采集；请稍后重试", err.code)
+                        raise ApiError("登录已失效或请求受限，同步已停止，请稍后再试", err.code)
                     if consecutive_errors >= 3:
-                        raise ApiError("连续三次查询失败，已停止采集；已保存进度")
+                        raise ApiError("连续 3 首查询失败，同步已停止，进度已保存")
                 counts["queried"] += 1
                 self.store.update_run(run_id, **counts)
             stats = self.store.stats(uid)
-            phase = "本批采集完成" if stats["pending"] else "当前候选歌曲已查询完成"
+            phase = "这一批已同步完成" if stats["pending"] else "已发现的歌曲都查询完了"
             if stats["failed"]:
-                phase += " · %s 首失败可重试" % stats["failed"]
+                phase += " · %s 首查询失败，下次同步会自动重试" % stats["failed"]
             self.store.update_run(run_id, status="completed", phase=phase, error="；".join(sorted(set(warnings))) or None, **counts)
         except InterruptedError:
-            self.store.update_run(run_id, status="paused", phase="已暂停，可以继续采集", **counts)
+            self.store.update_run(run_id, status="paused", phase="已暂停，随时可以接着同步", **counts)
         except (ApiError, OSError, ValueError) as err:
-            self.store.update_run(run_id, status="failed", phase="采集已停止，进度已保存", error=str(err)[:200], **counts)
+            self.store.update_run(run_id, status="failed", phase="同步已停止，进度已保存", error=str(err)[:200], **counts)
         except Exception:
-            self.store.update_run(run_id, status="failed", phase="采集已停止，进度已保存", error="遇到未预期的响应格式，请检查接口版本后重试", **counts)
+            self.store.update_run(run_id, status="failed", phase="同步已停止，进度已保存", error="接口返回了无法识别的数据，请确认依赖版本后重试", **counts)

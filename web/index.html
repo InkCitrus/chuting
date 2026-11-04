@@ -2,49 +2,144 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>初听 · 音乐收听日历</title>
-  <meta name="description" content="把第一次听见的歌曲，放回那一天。你的本机音乐收听日历。">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141513" media="(prefers-color-scheme: dark)">
+  <title>初听 · 音乐初听日历</title>
+  <meta name="description" content="把每首歌第一次听见的时间，放回那一天。只保存在你电脑上的网易云音乐初听日历。">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="初听首页"><span class="soundmark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>初听<span class="brand-en">FIRST LISTENS</span></span></a>
-    <div class="top-actions"><span id="accountLabel" class="account-label">本机音乐档案</span><button class="button subtle" id="connectButton">连接账号</button><button class="button primary" id="collectButton">＋ 采集歌曲</button></div>
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="初听，回到首页">
+        <span class="soundmark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="brand-text"><span class="brand-name">初听</span><span class="brand-sub">音乐初听日历</span></span>
+      </a>
+      <div class="top-actions">
+        <span id="accountLabel" class="account-label">未连接</span>
+        <button type="button" class="button ghost" id="connectButton">连接网易云</button>
+        <button type="button" class="button primary" id="collectButton">同步歌曲</button>
+      </div>
+    </div>
   </header>
+
   <main>
     <section class="intro">
-      <div><p class="eyebrow">YOUR MUSIC, IN DAYS</p><h1>每首歌，都有初次相遇的日子。</h1><p class="intro-copy">把第一次听见的旋律，放回那一天。</p></div>
-      <div class="intro-label"><span class="status-dot"></span>首次播放日历<small>时间显示到分钟 · 北京时间</small></div>
-    </section>
-    <section class="stats" aria-label="采集覆盖">
-      <div class="stat"><span>已找到首次时间</span><strong id="availableCount">0</strong><small>有首次播放时间</small></div>
-      <div class="stat"><span>有记录的日子</span><strong id="daysCount">0</strong><small id="dateRange">等待你的第一首歌</small></div>
-      <div class="stat"><span>已发现候选歌曲</span><strong id="discoveredCount">0</strong><small id="coverageText">从你的音乐库发现</small></div>
-      <div class="stat stat-progress"><span id="runLabel">本机保存，慢慢积累</span><strong id="queriedCount">0<span class="fraction"> / 0</span></strong><progress id="coverageProgress" max="1" value="0" aria-label="歌曲查询进度"></progress><small id="qualityText">空结果会保留，之后仍可补查</small></div>
-    </section>
-    <div id="runNotice" class="run-notice" hidden><span id="runMessage"></span><button id="pauseButton" class="text-button" hidden>暂停采集</button></div>
-    <section class="workspace" aria-label="音乐日历">
-      <div class="calendar-panel">
-        <div class="calendar-toolbar"><div class="month-navigation"><button class="icon-button" id="previousMonth" aria-label="上个月">‹</button><label class="month-title"><span id="monthTitle"></span><input id="monthPicker" type="month" aria-label="选择月份"></label><button class="icon-button" id="nextMonth" aria-label="下个月">›</button><button class="button subtle today-button" id="todayButton">今天</button></div><span class="month-count" id="monthCount">本月 0 首初听</span></div>
-        <div class="weekday-row" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
-        <div id="calendarGrid" class="calendar-grid" aria-label="按日期选择歌曲"></div>
-        <div class="calendar-footer"><span><i class="legend-dot"></i>当天首次听到的歌曲</span><span>空白日期表示尚无已采集记录</span></div>
+      <div class="intro-text">
+        <p class="eyebrow">网易云音乐 · 初听日历</p>
+        <h1><span>每首歌，</span><span>都有第一次听见的那天。</span></h1>
+        <p class="intro-copy">从「回忆坐标」找回每首歌的初听时间，按日子排好，只存在你的电脑里。</p>
       </div>
-      <aside class="day-panel">
-        <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="songSearch" type="search" placeholder="搜索歌名或歌手" aria-label="搜索所有月份的歌曲" autocomplete="off"></div>
-        <div class="day-heading"><p class="eyebrow" id="dayEyebrow">DAY IN MUSIC</p><h2 id="dayTitle"></h2><p id="daySubtitle"></p></div>
+      <div class="intro-label"><span class="status-dot" aria-hidden="true"></span><span>初听模式<small>北京时间 · 精确到分钟</small></span></div>
+    </section>
+
+    <section class="stats" aria-label="同步概况">
+      <div class="stat">
+        <span class="stat-label">已归档歌曲</span>
+        <strong id="availableCount">0</strong>
+        <small>已找到初听时间</small>
+      </div>
+      <div class="stat">
+        <span class="stat-label">有初听的日子</span>
+        <strong id="daysCount">0</strong>
+        <small id="dateRange">还没有记录</small>
+      </div>
+      <div class="stat">
+        <span class="stat-label">已发现歌曲</span>
+        <strong id="discoveredCount">0</strong>
+        <small id="coverageText">来自你的网易云曲库</small>
+      </div>
+      <div class="stat stat-progress">
+        <span class="stat-label" id="runLabel">查询进度</span>
+        <strong id="queriedCount">0<span class="fraction"> / 0</span></strong>
+        <progress id="coverageProgress" max="1" value="0" aria-label="歌曲查询进度"></progress>
+        <small id="qualityText">没有记录的歌曲会保留，之后可以再查</small>
+      </div>
+    </section>
+
+    <div id="runNotice" class="run-notice" role="status" hidden>
+      <span class="run-indicator" aria-hidden="true"></span>
+      <span id="runMessage" class="run-message"></span>
+      <button type="button" id="pauseButton" class="text-button" hidden>暂停同步</button>
+    </div>
+
+    <section class="workspace" aria-label="初听日历">
+      <div class="calendar-panel card">
+        <div class="calendar-toolbar">
+          <div class="month-navigation">
+            <button type="button" class="icon-button" id="previousMonth" aria-label="上个月"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></button>
+            <label class="month-title" title="选择月份"><span id="monthTitle"></span><input id="monthPicker" type="month" aria-label="选择月份"></label>
+            <button type="button" class="icon-button" id="nextMonth" aria-label="下个月"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
+            <button type="button" class="button ghost small today-button" id="todayButton">回到今天</button>
+          </div>
+          <span class="month-count" id="monthCount">本月 0 首初听</span>
+        </div>
+        <div class="weekday-row" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div id="calendarGrid" class="calendar-grid" aria-label="按日期查看初听歌曲"></div>
+        <div class="calendar-footer">
+          <span class="legend" aria-hidden="true">少<i class="heat-swatch l1"></i><i class="heat-swatch l2"></i><i class="heat-swatch l3"></i><i class="heat-swatch l4"></i>多</span>
+          <span>空白只表示还没同步到记录，不代表那天没听歌</span>
+        </div>
+      </div>
+
+      <aside class="day-panel card">
+        <div class="search-wrap">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.8 3.8"/></svg>
+          <input id="songSearch" type="search" placeholder="搜索歌名或歌手" aria-label="在所有月份中搜索歌曲" autocomplete="off" enterkeyhint="search">
+        </div>
+        <div class="day-heading">
+          <p class="eyebrow" id="dayEyebrow">今天</p>
+          <h2 id="dayTitle"></h2>
+          <p id="daySubtitle"></p>
+        </div>
         <div id="songList" class="song-list" aria-live="polite"></div>
-        <div class="day-note"><span class="tiny-record" aria-hidden="true">◎</span><p>这里记录服务端提供的<strong>首次播放</strong>时间，不代表当天的全部听歌记录。</p></div>
+        <div class="day-note">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/></svg>
+          <p>这里只记录每首歌的<strong>第一次</strong>播放，不是当天完整的听歌记录。</p>
+        </div>
       </aside>
     </section>
-    <section class="bottom-strip"><p><span class="status-dot"></span>音乐数据保存在这台电脑</p><div><a href="/api/export?format=json" id="exportJson">导出 JSON ↗</a><a href="/api/export?format=csv" id="exportCsv">导出 CSV ↗</a></div></section>
+
+    <footer class="bottom-strip">
+      <p><span class="status-dot" aria-hidden="true"></span>所有数据只保存在这台电脑上</p>
+      <div class="export-links"><a href="/api/export?format=json" id="exportJson">导出 JSON</a><a href="/api/export?format=csv" id="exportCsv">导出 CSV</a></div>
+    </footer>
   </main>
-  <dialog id="collectDialog">
-    <form id="collectForm"><button type="button" class="dialog-close icon-button" id="closeCollect" aria-label="关闭采集面板">×</button><p class="eyebrow">GROW YOUR ARCHIVE</p><h2>找回那些初次听见。</h2><p class="dialog-copy">从近期播放、听歌排行和喜欢的歌曲中发现曲目，再查询它们的首次播放时间。已归档歌曲会自动跳过。</p><label class="form-field">本次查询数量<select id="batchLimit"><option value="200">下一批 200 首</option><option value="50">下一批 50 首</option><option value="1000">下一批 1,000 首</option><option value="0">全部待查询歌曲</option></select></label><label class="checkbox-row"><input id="includePlaylists" type="checkbox" checked>同时发现我创建的歌单里的歌曲</label><label class="checkbox-row"><input id="retryEmpty" type="checkbox">重新查询之前没有首次时间的歌曲</label><p class="form-hint">每次请求之间留出间隔，进度会持续保存。暂停后可从未完成的歌曲继续。</p><p id="collectError" class="error-text" role="alert"></p><button type="submit" class="button primary full-width" id="startCollect">开始采集</button></form>
+
+  <dialog id="collectDialog" aria-labelledby="collectTitle">
+    <form id="collectForm">
+      <button type="button" class="dialog-close icon-button" id="closeCollect" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+      <p class="eyebrow">同步歌曲</p>
+      <h2 id="collectTitle">把更多初听找回来</h2>
+      <p class="dialog-copy">先从最近播放、听歌排行和喜欢的歌曲里找出歌曲，再逐首查询它们的初听时间。查过的歌会自动跳过。</p>
+      <label class="form-field">这次查询多少首
+        <select id="batchLimit">
+          <option value="200">200 首（推荐）</option>
+          <option value="50">50 首</option>
+          <option value="1000">1,000 首</option>
+          <option value="0">全部未查询的歌曲</option>
+        </select>
+      </label>
+      <label class="checkbox-row"><input id="includePlaylists" type="checkbox" checked><span>也查找我创建的歌单</span></label>
+      <label class="checkbox-row"><input id="retryEmpty" type="checkbox"><span>重新查询之前没有记录的歌曲</span></label>
+      <p class="form-hint">为了不给接口添麻烦，每首之间会停顿约 1 秒。进度随时保存，暂停后可以接着同步。</p>
+      <p id="collectError" class="error-text" role="alert"></p>
+      <button type="submit" class="button primary full-width" id="startCollect">开始同步</button>
+    </form>
   </dialog>
-  <dialog id="songDialog"><button class="dialog-close icon-button" id="closeSong" aria-label="关闭歌曲详情">×</button><p class="eyebrow">THE FIRST TIME</p><h2 id="detailName"></h2><p id="detailArtists" class="dialog-copy"></p><dl id="detailFacts"></dl><a class="button subtle" id="songLink" target="_blank" rel="noreferrer">在网易云打开 ↗</a></dialog>
+
+  <dialog id="songDialog" aria-labelledby="detailName">
+    <button type="button" class="dialog-close icon-button" id="closeSong" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <p class="eyebrow">初听档案</p>
+    <h2 id="detailName"></h2>
+    <p id="detailArtists" class="dialog-copy"></p>
+    <dl id="detailFacts"></dl>
+    <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+  </dialog>
+
   <div id="toast" class="toast" role="alert" hidden></div>
 </body>
 </html>

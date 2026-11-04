@@ -10,15 +10,15 @@ from .sync import SyncManager
 
 def main():
     os.umask(0o077)
-    parser = argparse.ArgumentParser(description="本机网易云首次播放日历")
-    parser.add_argument("--data-dir", default=os.environ.get("MUSIC_CALENDAR_DATA", "data"))
+    parser = argparse.ArgumentParser(description="初听：在本机整理网易云音乐的初听日历")
+    parser.add_argument("--data-dir", default=os.environ.get("MUSIC_CALENDAR_DATA", "data"), help="数据目录（默认 data/，也可用 MUSIC_CALENDAR_DATA 指定）")
     sub = parser.add_subparsers(dest="command", required=True)
-    web = sub.add_parser("serve", help="启动本机日历")
-    web.add_argument("--port", type=int, default=8767)
-    sync = sub.add_parser("sync", help="采集歌曲首次播放时间")
-    sync.add_argument("--limit", type=int, default=200, help="每批数量，0 表示全部待查歌曲")
-    sync.add_argument("--no-playlists", action="store_true")
-    sync.add_argument("--retry-empty", action="store_true")
+    web = sub.add_parser("serve", help="启动网页日历")
+    web.add_argument("--port", type=int, default=8767, help="网页端口（默认 8767）")
+    sync = sub.add_parser("sync", help="同步歌曲的初听时间")
+    sync.add_argument("--limit", type=int, default=200, help="这次查询多少首，0 表示全部未查询的歌曲（默认 200）")
+    sync.add_argument("--no-playlists", action="store_true", help="不查找我创建的歌单")
+    sync.add_argument("--retry-empty", action="store_true", help="重新查询之前没有记录的歌曲")
     args = parser.parse_args()
     directory = Path(args.data_dir).resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -28,13 +28,13 @@ def main():
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        raise SystemExit("这个数据目录已被另一个日历或采集进程使用")
+        raise SystemExit("这个数据目录正被另一个初听进程使用，请先关闭它")
     if args.command == "serve":
         from .server import serve
         serve(directory, args.port)
         return
     if args.limit < 0 or args.limit > 10000:
-        parser.error("--limit 应在 0 至 10000 之间")
+        parser.error("--limit 需在 0 到 10000 之间")
     store = Store(args.data_dir)
     client = NeteaseClient(args.data_dir)
     manager = SyncManager(store, client)

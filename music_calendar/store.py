@@ -14,21 +14,21 @@ def now_ms():
 
 def parse_first_info(body):
     if body.get("code") != 200:
-        raise ValueError("接口未返回成功状态")
+        raise ValueError("接口没有返回成功状态")
     data = body.get("data") or {}
     first = data.get("musicFirstListenDto") or {}
     raw = first.get("listenTime")
     if raw in (None, 0, "0", ""):
         return None
     if isinstance(raw, bool):
-        raise ValueError("首次收听时间格式异常")
+        raise ValueError("初听时间格式异常")
     try:
         stamp = int(raw)
     except (ValueError, TypeError):
-        raise ValueError("首次收听时间格式异常")
+        raise ValueError("初听时间格式异常")
     # This endpoint uses milliseconds. Do not silently promote second timestamps.
     if stamp < 946684800000 or stamp > now_ms() + 86400000:
-        raise ValueError("首次收听时间单位或范围异常")
+        raise ValueError("初听时间的单位或范围异常")
     song = data.get("songInfoDto") or {}
     return {
         "first_listen_ms": stamp,
@@ -126,7 +126,7 @@ class Store:
             raise ValueError("账号或歌曲 ID 格式异常")
         returned_id = ((body.get("data") or {}).get("songInfoDto") or {}).get("songId")
         if returned_id is not None and str(returned_id) != sid:
-            raise ValueError("接口返回的歌曲 ID 与查询不一致")
+            raise ValueError("接口返回的歌曲 ID 与查询的不一致")
         fact = parse_first_info(body)
         serialized = json.dumps(body, ensure_ascii=False, sort_keys=True)
         digest = hashlib.sha256(serialized.encode()).hexdigest()
@@ -198,7 +198,7 @@ class Store:
 
     def new_run(self, uid):
         with self.connection() as db:
-            cur = db.execute("INSERT INTO runs(uid,status,phase,started_ms,updated_ms) VALUES (?,'running','正在连接账号',?,?)", (str(uid), now_ms(), now_ms()))
+            cur = db.execute("INSERT INTO runs(uid,status,phase,started_ms,updated_ms) VALUES (?,'running','确认账号',?,?)", (str(uid), now_ms(), now_ms()))
             return cur.lastrowid
 
     def update_run(self, run_id, **values):
@@ -215,4 +215,4 @@ class Store:
 
     def recover_runs(self):
         with self.connection() as db:
-            db.execute("UPDATE runs SET status='interrupted',phase='上次采集中断，可以继续',updated_ms=? WHERE status='running'", (now_ms(),))
+            db.execute("UPDATE runs SET status='interrupted',phase='上次同步意外中断，可以接着同步',updated_ms=? WHERE status='running'", (now_ms(),))

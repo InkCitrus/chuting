@@ -2,7 +2,7 @@
   "name": "netease-listening-archive",
   "version": "0.1.0",
   "private": true,
-  "description": "A local calendar of first listens from NetEase Cloud Music",
+  "description": "初听：本机运行的网易云音乐初听日历",
   "scripts": {
     "start": "python3 -m music_calendar serve",
     "test": "python3 -m unittest discover -s tests -v"
