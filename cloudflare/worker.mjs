@@ -53,8 +53,10 @@ export async function handleApi(request, env, upstream = callNetease) {
     }
     if (url.pathname === '/api/auth/logout') return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) })
     const session = await getSession(request, env.SESSION_SECRET)
-    if (!session?.account || !session.cookie?.MUSIC_U) throw new ApiError('请先扫码连接网易云音乐', 401)
-    if (url.pathname === '/api/auth/status') return json({ account: session.account })
+    const valid = Boolean(session?.account && session.cookie?.MUSIC_U)
+    // A status probe without a session is a normal answer, not an error (avoids a 401 in every visitor's console).
+    if (url.pathname === '/api/auth/status') return json({ account: valid ? session.account : null })
+    if (!valid) throw new ApiError('请先扫码连接网易云音乐', 401)
     if (url.pathname !== '/api/netease') return json({ error: '接口不存在' }, 404)
     if (String(body.uid) !== session.account.uid) throw new ApiError('登录账号已改变，请暂停后重新连接', 401)
     // Only collector methods are public. QR exchange is handled above.

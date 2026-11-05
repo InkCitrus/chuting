@@ -43,6 +43,17 @@ test('proxy rejects cross origin, no session, account mismatch and arbitrary rou
   assert.throws(() => endpoint('song_detail', { ids: '1);DROP TABLE' }), /格式/)
   assert.equal(endpoint('user_playlist', { uid: 'ATTACKER' }, '1')[1].uid, '1')
 })
+test('session status probe answers without a session instead of failing', async () => {
+  const env = { SESSION_SECRET: secret }, rpc = async () => assert.fail('status must not call upstream')
+  const anonymous = await handleApi(req('/api/auth/status'), env, rpc)
+  assert.equal(anonymous.status, 200)
+  assert.deepEqual(await anonymous.json(), { account: null })
+  const token = await seal({ account: { uid: '1', nickname: 'Test' }, cookie: { MUSIC_U: 'fake' } }, secret, 'session', 60)
+  assert.deepEqual(await (await handleApi(req('/api/auth/status', {}, 'chuting_session=' + token), env, rpc)).json(), { account: { uid: '1', nickname: 'Test' } })
+  const noCookie = await seal({ account: { uid: '1' }, cookie: {} }, secret, 'session', 60)
+  assert.deepEqual(await (await handleApi(req('/api/auth/status', {}, 'chuting_session=' + noCookie), env, rpc)).json(), { account: null })
+  assert.equal((await handleApi(req('/api/auth/status', {}, null, 'https://other.example'), env, rpc)).status, 403)
+})
 test('QR login returns only account and an encrypted HttpOnly credential', async () => {
   const rpc = async method => method === 'qr_key' ? { body: { unikey: 'qr-fixture' } }
     : method === 'qr_check' ? { body: { code: 803 }, cookie: { MUSIC_U: 'sensitive-fixture' } }
