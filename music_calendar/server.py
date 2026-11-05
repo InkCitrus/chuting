@@ -70,7 +70,7 @@ def make_handler(app):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; frame-ancestors 'none'; base-uri 'none'")
             if filename:
                 self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
             self.end_headers()
@@ -112,9 +112,12 @@ def make_handler(app):
                         return self.send(200, "\ufeff" + output.getvalue(), "text/csv; charset=utf-8", "first-listens.csv")
                     return self.send(200, {"account": account, "kind": "first_listen", "timezone": "Asia/Shanghai", "coverage": app.store.stats(account["uid"]), "events": records}, filename="first-listens.json")
                 files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8")}
-                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js"):
+                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js", "insights.js"):
                     files["/" + name] = (name, "text/javascript; charset=utf-8")
                 files["/favicon.svg"] = ("favicon.svg", "image/svg+xml")
+                files["/manifest.webmanifest"] = ("manifest.webmanifest", "application/manifest+json")
+                for size in ("192", "512"):
+                    files["/icons/icon-%s.png" % size] = ("icons/icon-%s.png" % size, "image/png")
                 if url.path in files:
                     file, mime = files[url.path]
                     return self.send(200, (WEB / file).read_bytes(), mime)

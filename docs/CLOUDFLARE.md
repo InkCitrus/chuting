@@ -60,6 +60,10 @@ Pages CLI 不支持自定义配置路径，因此使用根目录的标准 `wrang
 
 `web/_headers` 还让 `.js` / `.css` 每次重新验证（ETag 命中时只返回 304）。页面由多个 ES 模块组成，默认的 4 小时浏览器缓存可能让新旧模块混用，发布后出现难以复现的错误。
 
+离线：`web/sw.js` 是同源 Service Worker。页面和模块走「网络优先」，只有断网时才用缓存，所以发布后不会继续跑旧代码；`npm run build:pages` 会把 `dist/pages` 的内容哈希写进缓存名，旧缓存在新版本激活时删除。`_headers` 让 `/sw.js` 不缓存，浏览器每次都能检查更新。`/api/*` 从不经过缓存。档案本身在 IndexedDB 里，断网也能翻看和搜索。
+
+专辑封面直接从网易云图片 CDN（`https://*.music.126.net`）加载，带 `?param=120y120` 等尺寸参数；CSP 的 `img-src` / `connect-src` 只额外放行这个域名。看过的封面由 Service Worker 留存（最多 600 张，超出时先删最早的）。
+
 内容安全策略只允许同源脚本。如果在 Pages 控制台开启了 Web Analytics，Cloudflare 自动注入的 `static.cloudflareinsights.com` 信标会被拦截，并在控制台报错。初听不收集访问数据，建议在项目的 Metrics → Web Analytics 中关闭自动注入，不要放宽 CSP。
 
 首次创建项目（已有项目跳过）：
