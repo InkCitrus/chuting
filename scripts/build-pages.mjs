@@ -20,7 +20,7 @@ async function hashTree(dir) {
   for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) await hashTree(full)
-    else if (entry.name !== 'sw.js') digest.update(path.relative(output, full)).update(await readFile(full))
+    else digest.update(path.relative(output, full)).update(await readFile(full)) // include sw.js so strategy changes bump VERSION
   }
 }
 await hashTree(output)
@@ -28,6 +28,19 @@ const swPath = path.join(output, 'sw.js'), version = digest.digest('hex').slice(
 const sw = await readFile(swPath, 'utf8')
 if (!sw.includes("'__BUILD__'")) throw new Error('sw.js is missing its version placeholder')
 await writeFile(swPath, sw.replace("'__BUILD__'", `'${version}'`))
+// Append ?v=<stamp> to every module / stylesheet URL the page and its imports use, so a zone-level
+// cache that ignores _headers cannot mix an old app.js with a new rotator.js (or the reverse).
+const bust = `?v=${version}`
+const stampHtml = text => text.replace(/(href|src)="(\/(?:app|backend|browser-store|browser-sync|archive-core|insights|rotator|copy|player|styles)\.[^"]+)"/g,
+  (_, attr, url) => `${attr}="${url.includes('?') ? url : url + bust}"`)
+const stampJs = text => text.replace(/(from\s+|import\s*\(\s*)(['"])(\.\/[^'"]+\.js)\2/g,
+  (_, pre, q, url) => `${pre}${q}${url.includes('?') ? url : url + bust}${q}`)
+for (const entry of await readdir(output, { withFileTypes: true })) {
+  if (!entry.isFile()) continue
+  const full = path.join(output, entry.name)
+  if (entry.name === 'index.html') await writeFile(full, stampHtml(await readFile(full, 'utf8')))
+  else if (entry.name.endsWith('.js') && entry.name !== 'sw.js') await writeFile(full, stampJs(await readFile(full, 'utf8')))
+}
 const wrangler = path.join(root, 'node_modules/wrangler/bin/wrangler.js')
 const result = spawnSync(process.execPath, [wrangler, 'pages', 'functions', 'build', 'functions',
   '--outdir', 'dist/pages/_worker.js', '--compatibility-date', '2026-11-03', '--compatibility-flag', 'nodejs_compat'],

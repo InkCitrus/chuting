@@ -1,6 +1,7 @@
 // 初听 service worker: offline copy of the app shell + a bounded cache of viewed album covers.
-// Code is always network-first (the network copy is revalidated per _headers), so a deploy is picked up on
-// the next load; the cached copy is used only when the network fails. VERSION is stamped by the Pages build,
+// Code is always network-first with cache:'no-store' so a deploy (and a zone TTL change) is picked up
+// even when Safari/WebKit would otherwise reuse a stale HTTP-cached module through the SW.
+// The Cache Storage copy is used only when the network fails. VERSION is stamped by the Pages build,
 // and activating a new version drops older shell caches.
 const VERSION = '__BUILD__'
 const SHELL = `chuting-shell-${VERSION}`
@@ -24,6 +25,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url)
   if (url.origin === self.location.origin) {
     if (url.pathname.startsWith('/api/')) return // live data and login are never cached here
+    // Pathname only: ?v= build stamps must not bypass the shell handler.
     const shell = request.mode === 'navigate' ? '/' : FILES.includes(url.pathname) ? url.pathname : null
     if (shell) event.respondWith(networkFirst(request, shell))
     return
@@ -34,7 +36,9 @@ self.addEventListener('fetch', event => {
 async function networkFirst(request, key) {
   const cache = await caches.open(SHELL)
   try {
-    const response = await fetch(request)
+    // cache:'no-store' is the Safari/WebKit fix: SW fetch() otherwise reuses a long-lived HTTP
+    // cache entry even after Cache-Control flips to max-age=0 (Cmd+Shift+R only bypasses the document).
+    const response = await fetch(request, { cache: 'no-store' })
     if (response.ok && response.type === 'basic') cache.put(key, response.clone())
     return response
   } catch (err) {

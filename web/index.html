@@ -51,11 +51,11 @@
       <div class="hero-text">
         <p class="kicker" id="heroKicker">网易云音乐 · 初听档案</p>
         <h1 class="hero-title" id="heroTitle"><span class="hero-pre">你的</span><em><b>初</b><b>听</b></em></h1>
-        <p class="hero-tagline" id="heroTagline"></p>
-        <p class="hero-story" id="heroStory"></p>
-        <p class="hero-sub" id="heroSub"></p>
+        <p class="hero-tagline" id="heroTagline">每首歌，都有第一次响起的那天。</p>
+        <p class="hero-story" id="heroStory">扫一下，把你喜欢的歌一首首送回第一次听见它的那天。</p>
+        <p class="hero-sub" id="heroSub">先从你喜欢的歌开始，想多翻点，设置里再开。</p>
         <div class="hero-actions">
-          <button type="button" class="button primary large" id="heroAction" hidden></button>
+          <button type="button" class="button primary large" id="heroAction" data-action="connect">连接网易云音乐</button>
           <a class="scroll-cue" href="#timelineSection" id="scrollCue" hidden><span>往下翻，从<span id="scrollCueText">最近的一首</span>开始</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5"/></svg></a>
         </div>
         <div id="syncLine" class="sync-line" role="status" hidden>
@@ -78,7 +78,7 @@
       </section>
     </section>
 
-    <section class="intro" id="intro" aria-labelledby="introTitle" hidden>
+    <section class="intro" id="intro" aria-labelledby="introTitle">
       <h2 class="intro-title" id="introTitle">扫一次码，剩下的交给它</h2>
       <ol class="intro-steps">
         <li><span class="step-num">01</span><h3>扫一下</h3><p>打开网易云音乐 App，扫一下就好。</p></li>
@@ -87,7 +87,7 @@
       </ol>
     </section>
 
-    <section class="timeline-section" id="timelineSection" aria-labelledby="timelineTitle">
+    <section class="timeline-section" id="timelineSection" aria-labelledby="timelineTitle" hidden>
       <div class="timeline-head">
         <div class="timeline-heading">
           <h2 id="timelineTitle">时间线</h2>
