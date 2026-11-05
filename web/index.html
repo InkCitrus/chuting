@@ -9,7 +9,7 @@
   <title>初听 · 你的初听时间线</title>
   <meta name="description" content="把每首歌第一次听见的时间，写成一条可以慢慢翻看的时间线。只保存在你电脑上的网易云音乐初听档案。">
   <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <script src="/app.js" type="module"></script>
 </head>
 <body>
   <header class="bar">
@@ -40,6 +40,8 @@
       <p class="hero-sub" id="heroSub"></p>
       <div class="hero-actions">
         <button type="button" class="button primary large" id="heroAction" hidden></button>
+        <button type="button" class="text-button" id="importQuick" hidden>导入 / 迁移</button>
+        <button type="button" class="text-button" id="backupQuick" hidden>备份档案</button>
         <a class="scroll-cue" href="#timelineSection" id="scrollCue" hidden><span>往下翻，从<span id="scrollCueText">最近的一首</span>开始</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5"/></svg></a>
       </div>
       <div id="syncLine" class="sync-line" role="status" hidden>
@@ -79,8 +81,8 @@
     <footer class="closing">
       <p class="closing-line">这里只记录每首歌的<strong>第一次</strong>播放，<br class="mobile-break">不是每天完整的听歌记录。</p>
       <div class="closing-row">
-        <p class="closing-note"><span class="ok-dot" aria-hidden="true"></span>所有数据只保存在这台电脑上 · 时间按北京时间显示</p>
-        <div class="export-links"><a href="/api/export?format=json" id="exportJson">导出 JSON</a><a href="/api/export?format=csv" id="exportCsv">导出 CSV</a></div>
+        <p class="closing-note"><span class="ok-dot" aria-hidden="true"></span><span id="storageNote">所有数据只保存在这台电脑上 · 时间按北京时间显示</span></p>
+        <div class="export-links"><button type="button" class="text-button" id="importButton" hidden>导入档案</button><input type="file" id="importFile" accept="application/json,.json" hidden><a href="/api/export?format=json" id="exportJson">导出 JSON</a><a href="/api/export?format=csv" id="exportCsv">导出 CSV</a></div>
       </div>
     </footer>
   </main>
@@ -101,10 +103,25 @@
       </label>
       <label class="checkbox-row"><input id="includePlaylists" type="checkbox" checked><span>也查找我创建的歌单</span></label>
       <label class="checkbox-row"><input id="retryEmpty" type="checkbox"><span>重新查询之前没有记录的歌曲</span></label>
-      <p class="form-hint">为了不给接口添麻烦，每首之间会停顿约 1 秒。进度随时保存，暂停后可以接着同步。</p>
+      <div id="cloudCollectOptions" hidden>
+        <label class="checkbox-row"><input id="includeHistory" type="checkbox" checked><span>也从历史月榜和年度报告里找歌</span></label>
+        <label class="form-field">历史起始年份<select id="historyFrom"><option value="">自动（根据听歌足迹）</option></select></label>
+        <label class="form-field">同时查询<select id="concurrency"><option value="2">2 首（推荐）</option><option value="1">1 首</option></select></label>
+      </div>
+      <p class="form-hint" id="syncHint">为了不给接口添麻烦，每首之间会停顿约 1 秒。进度随时保存，暂停后可以接着同步。</p>
       <p id="collectError" class="error-text" role="alert"></p>
       <button type="submit" class="button primary full-width" id="startCollect">开始同步</button>
     </form>
+  </dialog>
+
+  <dialog id="loginDialog" aria-labelledby="loginTitle">
+    <button type="button" class="dialog-close icon-button" id="closeLogin" aria-label="关闭登录">×</button>
+    <p class="kicker">连接网易云音乐</p>
+    <h2 id="loginTitle">扫码，把初听找回来</h2>
+    <p class="dialog-copy">用网易云音乐 App 扫码并确认登录。收听档案保存在当前浏览器中。</p>
+    <img id="loginQr" class="login-qr" width="240" height="240" alt="网易云音乐登录二维码" hidden>
+    <p id="loginStatus" role="status">正在生成二维码…</p>
+    <button type="button" class="button ghost" id="refreshQr">刷新二维码</button>
   </dialog>
 
   <dialog id="songDialog" aria-labelledby="detailName">

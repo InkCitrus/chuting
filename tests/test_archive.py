@@ -21,6 +21,16 @@ def response(stamp=1704124800000, name="Example"):
 
 
 class StoreTests(unittest.TestCase):
+    def test_old_empty_results_are_retried_automatically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(directory)
+            store.candidates("1", [{"id": "10"}], "test")
+            store.save_result("1", "10", {"code": 200, "data": {}})
+            self.assertEqual(store.pending("1"), [])
+            with store.connection() as db:
+                db.execute("UPDATE candidates SET last_attempt_ms=0 WHERE uid='1'")
+            self.assertEqual([s["song_id"] for s in store.pending("1")], ["10"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Store(self.temp.name)

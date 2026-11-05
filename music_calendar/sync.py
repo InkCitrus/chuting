@@ -33,15 +33,22 @@ class SyncManager:
         self.stop.set()
 
     def request(self, method, **query):
-        if self.stop.wait(self.delay):
-            raise InterruptedError()
-        return self.client.call(method, **query)
+        for attempt in range(3):
+            if self.stop.wait(self.delay if attempt == 0 else 2 ** attempt):
+                raise InterruptedError()
+            try:
+                return self.client.call(method, **query)
+            except ApiError as err:
+                # Retry transient transport/server errors only; auth/rate limits stop.
+                if attempt == 2 or err.code not in (0, 408, 500, 502, 503, 504):
+                    raise
 
     def discover(self, uid, run_id, playlists):
         warnings = []
         sources = [
             ("最近播放", "record_recent_song", {"limit": 1000}, lambda b: [song_metadata(x["data"]) for x in b.get("data", {}).get("list", [])]),
             ("累计排行", "user_record", {"uid": uid, "type": 0}, lambda b: [song_metadata(x["song"]) for x in b.get("allData", [])]),
+            ("本周排行", "user_record", {"uid": uid, "type": 1}, lambda b: [song_metadata(x["song"]) for x in b.get("weekData", [])]),
             ("喜欢的歌曲", "likelist", {"uid": uid}, lambda b: [{"id": str(i)} for i in b.get("ids", [])]),
         ]
         for label, method, query, extract in sources:

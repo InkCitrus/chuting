@@ -2,11 +2,25 @@
   "name": "netease-listening-archive",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "初听：本机运行的网易云音乐初听日历",
   "scripts": {
     "start": "python3 -m music_calendar serve",
-    "test": "python3 -m unittest discover -s tests -v"
+    "test": "python3 -m unittest discover -s tests -v && node --test tests/*.test.mjs",
+    "dev:cloudflare": "wrangler dev --config wrangler.worker.jsonc --ip 127.0.0.1 --port 8787",
+    "dev:pages": "wrangler pages dev web --ip 127.0.0.1 --port 8788",
+    "check:cloudflare": "wrangler deploy --config wrangler.worker.jsonc --dry-run --outdir dist/worker",
+    "deploy:cloudflare": "wrangler deploy --config wrangler.worker.jsonc"
   },
-  "engines": { "node": ">=22" },
-  "dependencies": { "@neteasecloudmusicapienhanced/api": "4.41.1" }
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "4.41.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.7",
+    "wrangler": "^4.157.0"
+  }
 }
