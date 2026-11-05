@@ -1,10 +1,35 @@
 'use strict'
 import { createBackend, remote } from './backend.js'
 import { insights } from './insights.js'
-import { createPlayer } from './player.js'
-import { rotate, clearCopy } from './rotator.js'
-import { taglines, timelineLedes, endTitles, WELCOME_LINES, SYNCING_LINES, LOADING_LINES, INTRO_TITLES, CLOSING_LINES, SYNCING_EMPTY } from './copy.js'
 import { coverSize } from './archive-core.js'
+
+// Rotator / copy / player are nice-to-have. If a stale cache drops one of them, the archive
+// still opens: welcome copy stays put, rotation and playback quietly no-op.
+const fallbackCopy = {
+  WELCOME_LINES: ['每首歌，都有第一次响起的那天。'],
+  SYNCING_LINES: ['正在一首首翻找，你和它们相遇的日子。'],
+  LOADING_LINES: ['正在翻开你的初听…'],
+  INTRO_TITLES: ['扫一次码，剩下的交给它'],
+  CLOSING_LINES: ['第一次只有一次，所以值得记下来。'],
+  SYNCING_EMPTY: ['第一首马上就到。'],
+  taglines: () => fallbackCopy.WELCOME_LINES,
+  timelineLedes: () => ['每一行，都是一首歌第一次响起的时刻。'],
+  endTitles: () => ['故事暂时写到这里。']
+}
+const plain = line => String(line || '').replaceAll('*', '')
+const softRotate = (el, pool) => { if (el) el.textContent = plain((pool && pool[0]) || '') }
+const softClear = (el, text) => { if (el) el.textContent = text || '' }
+const softPlayer = () => ({ show() {}, play() {}, get current() { return null }, get playing() { return false }, setActions() {}, setOffline() {}, render() {} })
+
+const [copyMod, rotMod, playerMod] = await Promise.all([
+  import('./copy.js').catch(() => null),
+  import('./rotator.js').catch(() => null),
+  import('./player.js').catch(() => null)
+])
+const { taglines, timelineLedes, endTitles, WELCOME_LINES, SYNCING_LINES, LOADING_LINES, INTRO_TITLES, CLOSING_LINES, SYNCING_EMPTY } = copyMod || fallbackCopy
+const rotate = rotMod?.rotate || softRotate
+const clearCopy = rotMod?.clearCopy || softClear
+const createPlayer = playerMod?.createPlayer || softPlayer
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
