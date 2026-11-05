@@ -35,6 +35,25 @@ npx wrangler secret put SESSION_SECRET --config wrangler.worker.jsonc
 
 ## Pages Functions 部署
 
+### GitHub Actions 自动发布
+
+工作流 `.github/workflows/pages.yml` 在各分支推送和 PR 中运行测试并构建；只有 `main` 的推送或在 `main` 手动运行时才发布。生产地址为 `https://chuting.inkorange.com`。
+
+仓库 Settings → Secrets and variables → Actions 中配置：
+
+| Secret | 用途 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | 仅授予目标账户的 Account → Cloudflare Pages → Edit 权限 |
+| `CLOUDFLARE_ACCOUNT_ID` | Pages 项目所属 Cloudflare 账户 ID |
+
+首次发布会检查 `chuting` 项目，并在 Cloudflare 中生成随机 `SESSION_SECRET`。后续部署保留已有密钥，不会每次令用户退出登录。此运行时密钥不进入 GitHub、构建产物或日志。
+
+`npm run build:pages` 仅从 `web/` 复制静态资源，并把 Functions 编译到 `dist/pages/_worker.js/`。CI 发布整个 `dist/pages`，不会读取或上传本机 `data/`、Cookie、个人备份或 `.dev.vars`。
+
+配置好授权后，每次将改动合并到 `main` 就会自动测试、构建并发布；测试失败不发布。Cloudflare 原生 Git 自动部署可以保持关闭，避免重复构建。
+
+### 手动发布
+
 Pages CLI 不支持自定义配置路径，因此使用根目录的标准 `wrangler.jsonc`；Workers 的 npm 命令已显式指定另一份配置。
 
 入口 `functions/api/[[path]].js` 复用相同代理。`web/_routes.json` 只让 `/api/*` 进入 Functions，`web/_headers` 设置静态资源安全响应头。
@@ -49,10 +68,10 @@ npx wrangler pages project create chuting --production-branch main
 
 ```sh
 npx wrangler pages secret put SESSION_SECRET --project-name chuting
-npx wrangler pages deploy web --project-name chuting --branch main
+npm run deploy:pages
 ```
 
-把 `chuting` 换成自己的项目名，同时修改 `wrangler.jsonc` 的 `name`。预览环境可在控制台设置独立 Secret。Git 集成部署的输出目录为 `web`，Functions 需开启 `nodejs_compat` 并设置密钥。
+把 `chuting` 换成自己的项目名时，同时修改 `wrangler.jsonc`、npm 命令和工作流。预览环境可在控制台设置独立 Secret。Git 集成部署的构建命令是 `npm run build:pages`，输出目录为 `dist/pages`；Functions 使用配置中的 `nodejs_compat`。
 
 本地验证 Pages：
 

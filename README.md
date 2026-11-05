@@ -31,13 +31,15 @@ npm run dev:cloudflare
 
 支持 Workers Static Assets 和 Pages Functions，完整部署和迁移步骤见 [Cloudflare 说明](docs/CLOUDFLARE.md)。
 
+GitHub Actions 会自动运行测试、构建；合并到 `main` 后发布至 Cloudflare Pages。生产域名：<https://chuting.inkorange.com>。
+
 ## 本机版快速开始
 
 需要 macOS 或 Linux、Python 3.9+（含时区数据）和 Node.js 22+。
 
 ```sh
-git clone https://github.com/InkCitrus/netease-listening-archive.git
-cd netease-listening-archive
+git clone https://github.com/InkCitrus/chuting.git
+cd chuting
 npm ci --ignore-scripts
 npm start
 ```

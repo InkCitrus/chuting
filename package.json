@@ -1,5 +1,5 @@
 {
-  "name": "netease-listening-archive",
+  "name": "chuting",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +9,8 @@
     "test": "python3 -m unittest discover -s tests -v && node --test tests/*.test.mjs",
     "dev:cloudflare": "wrangler dev --config wrangler.worker.jsonc --ip 127.0.0.1 --port 8787",
     "dev:pages": "wrangler pages dev web --ip 127.0.0.1 --port 8788",
+    "build:pages": "node scripts/build-pages.mjs",
+    "deploy:pages": "npm run build:pages && wrangler pages deploy dist/pages --project-name=chuting --branch=main",
     "check:cloudflare": "wrangler deploy --config wrangler.worker.jsonc --dry-run --outdir dist/worker",
     "deploy:cloudflare": "wrangler deploy --config wrangler.worker.jsonc"
   },
