@@ -291,3 +291,70 @@ test('by default only liked songs are requested and dated, newest like first; ot
   assert.ok(calls.includes('record_recent_song') && calls.includes('user_record'))
   db.db.close()
 })
+test('pacing: clean answers tighten the gap to the 15 req/s floor and the learned gap is remembered', async () => {
+  const db = await store(); await db.account(account)
+  await db.candidates('1', Array.from({ length: 80 }, (_, i) => ({ id: 100 + i, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), '喜欢的歌曲')
+  let saved = null
+  const pace = { get: () => saved, set: v => { saved = v } }
+  const sync = new BrowserSync(db, async (method, query) => method === 'login_status' ? { account } : method === 'music_first_listen_info' ? response(query.id) : { data: {}, ids: [], allData: [], weekData: [] },
+    { pace, wait: async () => {} })
+  assert.equal(sync.minInterval, 67)
+  assert.equal(sync.interval, 120)
+  await sync.start(account, { concurrency: 8, limit: 0 }); await sync.task
+  assert.equal(sync.interval, 67)
+  assert.equal(saved.interval, 67)
+  assert.equal((await db.status(account)).run.pace.rate, 14.9)
+  // The next run starts at the remembered rate; stale or silly values are clamped.
+  assert.equal(new BrowserSync(db, async () => ({}), { pace, wait: async () => {} }).interval, 67)
+  saved = { interval: 5 }; assert.equal(new BrowserSync(db, async () => ({}), { pace }).interval, 67)
+  saved = { interval: 99999 }; assert.equal(new BrowserSync(db, async () => ({}), { pace }).interval, 400)
+  await assert.rejects(sync.start(account, { concurrency: 9 }), /同步参数不正确/)
+  db.db.close()
+})
+test('pacing: a throttle answer multiplies the gap and the refused rate is never reused', async () => {
+  const db = await store(); await db.account(account)
+  await db.candidates('1', Array.from({ length: 40 }, (_, i) => ({ id: 200 + i, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), '喜欢的歌曲')
+  let saved = { interval: 67 }, n = 0
+  const pace = { get: () => saved, set: v => { saved = v } }
+  const sync = new BrowserSync(db, async (method, query) => {
+    if (method === 'login_status') return { account }
+    if (method === 'music_first_listen_info' && ++n === 20) throw Object.assign(new Error('cheating'), { code: 429 })
+    return method === 'music_first_listen_info' ? response(query.id) : { data: {}, ids: [], allData: [], weekData: [] }
+  }, { pace, wait: async () => {} })
+  await sync.start(account, { concurrency: 8, limit: 0 }); await sync.task
+  assert.equal((await db.status(account)).run.status, 'completed')
+  assert.ok(saved.interval >= 100, `remembered ${saved.interval}`)
+  db.db.close()
+})
+test('pacing: strict mode stops at the first throttle signal and records where', async () => {
+  const db = await store(); await db.account(account)
+  await db.candidates('1', Array.from({ length: 30 }, (_, i) => ({ id: 300 + i, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), '喜欢的歌曲')
+  let n = 0, waited = 0
+  const sync = new BrowserSync(db, async (method, query) => {
+    if (method === 'login_status') return { account }
+    if (method === 'music_first_listen_info' && ++n === 12) throw Object.assign(new Error('busy'), { code: 503 })
+    return method === 'music_first_listen_info' ? response(query.id) : { data: {}, ids: [], allData: [], weekData: [] }
+  }, { pace: { get: () => null, set() {} }, cooldown: 5000, wait: async ms => { if (ms >= 5000) waited++ } })
+  await sync.start(account, { concurrency: 4, limit: 0, strict: true }); await sync.task
+  const { run, stats } = await db.status(account)
+  assert.equal(run.status, 'failed')
+  assert.equal(run.pace.stopped_by, 429)
+  assert.equal(run.pace.method, 'music_first_listen_info')
+  assert.equal(waited, 0)
+  assert.ok(stats.available >= 8 && stats.available < 30)
+  db.db.close()
+})
+test('pacing: a sustained latency rise eases off before NetEase complains', async () => {
+  const db = await store(); await db.account(account)
+  await db.candidates('1', Array.from({ length: 40 }, (_, i) => ({ id: 400 + i, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), '喜欢的歌曲')
+  let n = 0
+  const sync = new BrowserSync(db, async (method, query) => {
+    if (method === 'login_status') return { account }
+    if (method !== 'music_first_listen_info') return { data: {}, ids: [], allData: [], weekData: [] }
+    await new Promise(r => setTimeout(r, ++n > 15 ? 160 : 5))
+    return response(query.id)
+  }, { pace: { get: () => null, set() {} }, latencySlack: 50, wait: async () => {} })
+  await sync.start(account, { concurrency: 2, limit: 0 }); await sync.task
+  assert.ok(sync.slowdowns >= 1)
+  db.db.close()
+})

@@ -1,21 +1,56 @@
 import { metadata, reportSongs, monthEnds, needsQuery, inScope, DAY } from './archive-core.js'
 const STOP_CODES = [301, 401, 403, 429, 460]
-const THROTTLED = [429, 460]
+// Throttle signals: explicit rate limits, -460 "cheating" bodies (the worker maps them to 429), 405 and 503.
+const THROTTLED = [405, 429, 460, 503]
+const PACE_KEY = 'chuting-pace'
+const localPace = {
+  get() { try { return JSON.parse(globalThis.localStorage?.getItem(PACE_KEY) || 'null') } catch { return null } },
+  set(value) { try { globalThis.localStorage?.setItem(PACE_KEY, JSON.stringify(value)) } catch {} }
+}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 // Liked songs first (newest like first), then the opt-in sources.
 const PRIORITY = ['喜欢的歌曲', '最近播放', '本周排行', '累计排行', '我的歌单']
 const rank = song => Math.min(...(song.sources || []).map(s => { const i = PRIORITY.indexOf(s); return i < 0 ? PRIORITY.length : i }), PRIORITY.length)
 export class BrowserSync {
-  // Adaptive pacing: requests start at most every `interval` ms (shared by all lanes and retries).
-  // A rate-limit answer triples the gap and cools down before retrying; steady success slowly
-  // tightens it again, never below `minInterval`. Repeated throttling stops the run, progress kept.
+  // AIMD pacing. Requests start at most every `interval` ms, shared by all lanes and retries.
+  // Clean answers shave the gap a little at a time (additive), down to `minInterval` (67 ms ≈ 15 req/s);
+  // a throttle answer multiplies it and cools down; a sustained rise in latency backs off gently.
+  // The rate that ran clean is remembered (localStorage), so the next sync starts there.
   constructor(store, rpc, options = {}) {
     this.store = store; this.rpc = rpc
     this.wait = options.wait || sleep
-    this.minInterval = options.interval ?? 280; this.interval = this.minInterval
+    this.pace = options.pace || (options.interval === undefined ? localPace : null)
+    this.minInterval = options.interval ?? 67
     this.maxInterval = options.maxInterval ?? 2400; this.cooldown = options.cooldown ?? 15000
+    this.step = options.step ?? 8; this.slack = options.latencySlack ?? 600
     this.lastStart = 0; this.gate = Promise.resolve(); this.stop = false; this.task = null
-    this.throttles = 0; this.streak = 0
+    this.resetPace()
+  }
+  startInterval() {
+    if (this.pace === null) return this.minInterval
+    const saved = Number(this.pace.get()?.interval)
+    return Math.min(400, Math.max(this.minInterval, Number.isFinite(saved) && saved > 0 ? saved : 120))
+  }
+  resetPace() {
+    this.interval = this.startInterval(); this.safe = this.minInterval
+    this.throttles = 0; this.slowdowns = 0; this.streak = 0; this.latency = 0; this.fastest = Infinity; this.requests = 0
+  }
+  paceInfo() {
+    return { interval: this.interval, rate: Math.round(10000 / Math.max(this.interval, 1)) / 10, throttles: this.throttles, slowdowns: this.slowdowns,
+      latency_ms: Math.round(this.latency), requests: this.requests }
+  }
+  remember() { this.pace?.set({ interval: Math.max(this.interval, this.safe), at: Date.now() }) }
+  observe(ms) {
+    this.requests++
+    this.fastest = Math.min(this.fastest, Math.max(ms, 40))
+    this.latency = this.latency ? this.latency * .8 + ms * .2 : ms
+    // Latency well above the best seen: NetEase (or the network) is struggling, so ease off before it says so.
+    if (this.requests > 8 && this.latency > Math.max(this.fastest * 2.5, this.fastest + this.slack)) {
+      this.interval = Math.min(this.maxInterval, Math.round(this.interval * 1.5)); this.slowdowns++; this.streak = 0
+      this.latency = this.fastest * 1.5
+      return
+    }
+    if (++this.streak >= 8 && this.interval > this.minInterval) { this.streak = 0; this.interval = Math.max(this.minInterval, this.interval - this.step) }
   }
   async request(method, query = {}) {
     for (let attempt = 0, throttled = 0; ; attempt++) {
@@ -27,18 +62,25 @@ export class BrowserSync {
       })
       this.gate = turn.catch(() => {})
       await turn
+      const t = Date.now()
       try {
         const body = await this.rpc(method, query)
-        if (++this.streak >= 25 && this.interval > this.minInterval) { this.streak = 0; this.interval = Math.max(this.minInterval, Math.round(this.interval * .85)) }
+        this.observe(Date.now() - t)
         return body
       } catch (err) {
         this.streak = 0
-        if (THROTTLED.includes(err.code) && throttled < 2 && ++this.throttles <= 3 && !this.stop) {
-          throttled++
+        if (THROTTLED.includes(err.code)) {
+          // Never settle faster than the gap that was just refused.
+          this.safe = Math.min(this.maxInterval, Math.max(this.safe, Math.round(this.interval * 1.5)))
           this.interval = Math.min(this.maxInterval, Math.max(900, this.interval * 3))
-          if (this.run) await this.phase(`网易云说慢点，歇 ${Math.round(this.cooldown * throttled / 1000)} 秒再来…`).catch(() => {})
-          await this.wait(this.cooldown * throttled)
-          continue
+          this.remember()
+          if (this.strict) { err.throttled = { method, at_interval: this.safe, requests: this.requests }; throw Object.assign(err, { code: err.code === 503 ? 429 : err.code }) }
+          if (throttled < 2 && ++this.throttles <= 3 && !this.stop) {
+            throttled++
+            if (this.run) await this.phase(`网易云说慢点，歇 ${Math.round(this.cooldown * throttled / 1000)} 秒再来…`).catch(() => {})
+            await this.wait(this.cooldown * throttled)
+            continue
+          }
         }
         if (STOP_CODES.includes(err.code) || err.message === 'PAUSED' || attempt >= 2 || ![0, 408, 500, 502, 503, 504].includes(err.code || 0)) throw err
         await this.wait(2000 * 2 ** attempt)
@@ -48,8 +90,8 @@ export class BrowserSync {
   async start(account, options = {}) {
     if (this.task) throw new Error('已经有一个同步任务在进行')
     const limit = Number(options.limit ?? 0), concurrency = Number(options.concurrency ?? 3)
-    if (!Number.isInteger(limit) || limit < 0 || limit > 100000 || ![1, 2, 3, 4].includes(concurrency)) throw new Error('同步参数不正确')
-    this.stop = false; this.throttles = 0; this.interval = this.minInterval
+    if (!Number.isInteger(limit) || limit < 0 || limit > 100000 || !(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 8)) throw new Error('同步参数不正确')
+    this.stop = false; this.strict = Boolean(options.strict); this.resetPace()
     let accept, reject
     const accepted = new Promise((a, b) => { accept = a; reject = b })
     const work = async lock => {
@@ -177,8 +219,13 @@ export class BrowserSync {
     if (options.limit) queue = queue.slice(0, Math.max(0, options.limit - this.run.queried))
     // ID-only candidates and songs without art get metadata in batches, rather than one extra call per song.
     const queued = new Set(queue.map(s => s.id))
+    const order = new Map(queue.map((s, i) => [s.id, i]))
     const lacking = songs.filter(s => (queued.has(s.id) && !s.name) || ((queued.has(s.id) || s.first_listen_ms) && !s.cover && !s.cover_checked_ms))
-    if (lacking.length) warnings.push(...await this.details(lacking, '读取歌名与封面'))
+      .sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9))
+    // Names and art for the first 100 in line come before any date lookup so the first rows render complete;
+    // the rest are fetched alongside the lookups (same pacing gate), instead of holding them back for seconds.
+    if (lacking.length) warnings.push(...await this.details(lacking.slice(0, 100), '读取歌名与封面'))
+    const rest = lacking.length > 100 ? this.details(lacking.slice(100)).then(w => { warnings.push(...w) }) : Promise.resolve()
     const offset = this.run.queried
     this.run.total = offset + queue.length
     let cursor = 0, consecutiveErrors = 0, fatal = null
@@ -197,14 +244,15 @@ export class BrowserSync {
           catch { fatal = new Error('本地存储失败，请检查可用空间'); this.stop = true; break }
           this.run.failed++
           consecutiveErrors++
-          if (STOP_CODES.includes(err.code) || consecutiveErrors >= 3) { fatal = err; this.stop = true }
+          if (STOP_CODES.includes(err.code) || err.throttled || consecutiveErrors >= 3) { fatal = err; this.stop = true }
         }
         this.run.queried++
         this.run.phase = `查询初听时间 · ${this.run.queried - offset} / ${queue.length}`
+        this.run.pace = this.paceInfo()
         await this.saveRun()
       }
     }
-    const lanes = await Promise.allSettled(Array.from({ length: options.concurrency }, lane))
+    const lanes = await Promise.allSettled([...Array.from({ length: options.concurrency }, lane), rest])
     const rejected = lanes.find(x => x.status === 'rejected')
     if (rejected) throw rejected.reason
     if (fatal) throw fatal
@@ -224,12 +272,14 @@ export class BrowserSync {
       }
       this.run.status = this.stop ? 'paused' : 'completed'
       this.run.phase = this.stop ? '停了，进度都在' : '同步好了'
+      this.run.pace = this.paceInfo(); this.remember()
       const unique = [...new Set(warnings)]
       this.run.error = unique.length ? unique.slice(0, 5).join('；') + (unique.length > 5 ? `；另有 ${unique.length - 5} 项未读取` : '') : null
     } catch (err) {
       this.run.status = err.message === 'PAUSED' ? 'paused' : 'failed'
       this.run.phase = err.message === 'PAUSED' ? '停了，进度都在' : '先停一下，进度都在'
       this.run.error = err.message === 'PAUSED' ? null : err.message
+      this.run.pace = { ...this.paceInfo(), ...(err.throttled ? { stopped_by: err.code, ...err.throttled } : {}) }
     }
     await this.saveRun()
   }

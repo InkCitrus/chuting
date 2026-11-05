@@ -863,6 +863,8 @@ function schedulePoll() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadStatus().catch(() => {}); else clearTimeout(pollTimer) })
 
 /* ---------- 连接与同步 ---------- */
+// Testing aid: localStorage['chuting-pace-strict'] = '1' stops a sync at the first throttle signal instead of cooling down.
+function strictPace() { try { return localStorage.getItem('chuting-pace-strict') === '1' } catch { return false } }
 async function connect() {
   const bar = $('barAction')
   bar.disabled = true
@@ -924,7 +926,7 @@ async function startSync(extra = {}) {
   if (running()) return
   if (!state.account || (state.local && !state.online)) { await connect(); return }
   try {
-    await api('/api/sync', { limit: 0, recent: settings.recent, playlists: settings.playlists, retry_empty: false, history: settings.history, history_from: '', concurrency: 3, ...options })
+    await api('/api/sync', { limit: 0, recent: settings.recent, playlists: settings.playlists, retry_empty: false, history: settings.history, history_from: '', concurrency: 8, strict: strictPace(), ...options })
     if (!quiet) toast(options.covers_only ? '补封面中' : '开始同步啦')
     await loadStatus()
   } catch (err) { if (!quiet || !/另一个标签页|已经有一个/.test(err.message)) fail(err) }
