@@ -21,6 +21,11 @@ export async function createBackend() {
   })
   return {
     local: true, configured: runtime.configured, store, sync,
+    // Whether the proxy still holds a valid NetEase session for the local archive's account.
+    async session() {
+      if (!runtime.configured || !account) return false
+      try { return (await remote('/api/auth/status', {})).account?.uid === account.uid } catch { return false }
+    },
     async connect(connected) { if (sync.task) throw new Error('请先暂停同步再切换账号'); account = await store.account(connected); await navigator.storage?.persist?.(); return account },
     async import(data) { if (sync.task) throw new Error('请先暂停同步再导入'); account = await store.import(data); await navigator.storage?.persist?.(); return account },
     async download(format) {

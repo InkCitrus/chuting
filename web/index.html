@@ -4,14 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f3efe6" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#100f0d" media="(prefers-color-scheme: dark)">
-  <title>初听 · 你的初听时间线</title>
-  <meta name="description" content="把每首歌第一次听见的时间，写成一条可以慢慢翻看的时间线。只保存在你电脑上的网易云音乐初听档案。">
+  <meta name="theme-color" content="#f4efe6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0c0b" media="(prefers-color-scheme: dark)">
+  <title>初听 · 每首歌第一次响起的那天</title>
+  <meta name="description" content="把网易云音乐里每首歌第一次听见的时间，排成一条可以慢慢翻看的时间线。档案只保存在你的浏览器里。">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="初听 · 每首歌第一次响起的那天">
+  <meta property="og:description" content="把网易云音乐里每首歌第一次听见的时间，排成一条可以慢慢翻看的时间线。">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="modulepreload" href="/backend.js">
+  <link rel="modulepreload" href="/browser-store.js">
+  <link rel="modulepreload" href="/browser-sync.js">
+  <link rel="modulepreload" href="/archive-core.js">
   <script src="/app.js" type="module"></script>
 </head>
 <body>
+  <div class="ambient" aria-hidden="true"><i class="blob a"></i><i class="blob b"></i><i class="blob c"></i></div>
+  <div class="scroll-progress" aria-hidden="true"></div>
+  <a class="skip-link" href="#timelineSection">跳到时间线</a>
+
   <header class="bar">
     <div class="bar-inner">
       <a class="brand" href="#top" aria-label="初听，回到开头">
@@ -29,18 +41,23 @@
   <main id="top">
     <section class="hero" aria-labelledby="heroTitle">
       <button type="button" class="hero-latest" id="heroLatest" hidden>
-        <span class="record" aria-hidden="true"><span class="record-label" id="latestTime"></span></span>
-        <span class="latest-kicker">最近一次初听</span>
-        <span class="latest-title" id="latestTitle"></span>
-        <span class="latest-meta" id="latestMeta"></span>
+        <span class="turntable" aria-hidden="true">
+          <span class="record"><span class="grooves"></span><span class="record-label"><span id="latestTime"></span></span></span>
+          <span class="tonearm"><i></i></span>
+        </span>
+        <span class="latest-text">
+          <span class="latest-kicker">最近一次初听</span>
+          <span class="latest-title" id="latestTitle"></span>
+          <span class="latest-meta" id="latestMeta"></span>
+        </span>
       </button>
       <p class="kicker" id="heroKicker">网易云音乐 · 初听档案</p>
-      <h1 class="hero-title" id="heroTitle"><span>你的</span><em>初听</em></h1>
+      <h1 class="hero-title" id="heroTitle"><span class="hero-pre">你的</span><em><b>初</b><b>听</b></em></h1>
       <p class="hero-story" id="heroStory"></p>
       <p class="hero-sub" id="heroSub"></p>
       <div class="hero-actions">
         <button type="button" class="button primary large" id="heroAction" hidden></button>
-        <button type="button" class="text-button" id="importQuick" hidden>导入 / 迁移</button>
+        <button type="button" class="text-button" id="importQuick" hidden>导入已有档案</button>
         <button type="button" class="text-button" id="backupQuick" hidden>备份档案</button>
         <a class="scroll-cue" href="#timelineSection" id="scrollCue" hidden><span>往下翻，从<span id="scrollCueText">最近的一首</span>开始</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5"/></svg></a>
       </div>
@@ -52,16 +69,27 @@
       </div>
     </section>
 
+    <section class="intro" id="intro" aria-labelledby="introTitle" hidden>
+      <h2 class="intro-title" id="introTitle">三步，翻开你的初听</h2>
+      <ol class="intro-steps">
+        <li><span class="step-num">01</span><h3>扫码连接</h3><p>用网易云音乐 App 扫一扫。登录状态加密保存在浏览器里，7 天后自动失效。</p></li>
+        <li><span class="step-num">02</span><h3>同步歌曲</h3><p>从最近播放、排行、喜欢的歌和歌单里找歌，再逐首查询「回忆坐标」里的初听时间。</p></li>
+        <li><span class="step-num">03</span><h3>慢慢翻看</h3><p>每首歌都回到你第一次听见它的那一天，按月份写成一条时间线。</p></li>
+      </ol>
+      <p class="intro-note"><span class="ok-dot" aria-hidden="true"></span>档案只保存在这个浏览器里，不上传到任何服务器。</p>
+    </section>
+
     <section class="timeline-section" id="timelineSection" aria-labelledby="timelineTitle">
       <div class="timeline-head">
         <div class="timeline-heading">
           <h2 id="timelineTitle">时间线</h2>
-          <p id="timelineMeta" class="timeline-meta"></p>
+          <p id="timelineMeta" class="timeline-meta" aria-live="polite"></p>
         </div>
-        <div class="timeline-tools">
+        <div class="timeline-tools" id="timelineTools">
           <label class="search">
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="m13.2 13.2 3.8 3.8"/></svg>
             <input id="songSearch" type="search" placeholder="搜索歌名或歌手" aria-label="搜索歌名或歌手" autocomplete="off" enterkeyhint="search">
+            <kbd class="search-key" aria-hidden="true">/</kbd>
           </label>
           <div class="segmented" role="group" aria-label="排列顺序">
             <button type="button" id="orderNewest" aria-pressed="true">最新在前</button>
@@ -72,14 +100,14 @@
       <div class="timeline-body">
         <nav id="scrubber" class="scrubber" aria-label="跳到月份"></nav>
         <div class="timeline-main">
-          <div id="timeline" class="timeline" aria-live="polite"></div>
+          <div id="timeline" class="timeline"></div>
           <div id="sentinel" class="sentinel" aria-hidden="true"></div>
         </div>
       </div>
     </section>
 
     <footer class="closing">
-      <p class="closing-line">这里只记录每首歌的<strong>第一次</strong>播放，<br class="mobile-break">不是每天完整的听歌记录。</p>
+      <p class="closing-line">这里只记录每首歌的<strong>第一次</strong>，<br class="mobile-break">不是每天完整的听歌记录。</p>
       <div class="closing-row">
         <p class="closing-note"><span class="ok-dot" aria-hidden="true"></span><span id="storageNote">所有数据只保存在这台电脑上 · 时间按北京时间显示</span></p>
         <div class="export-links"><button type="button" class="text-button" id="importButton" hidden>导入档案</button><input type="file" id="importFile" accept="application/json,.json" hidden><a href="/api/export?format=json" id="exportJson">导出 JSON</a><a href="/api/export?format=csv" id="exportCsv">导出 CSV</a></div>
@@ -87,12 +115,14 @@
     </footer>
   </main>
 
+  <button type="button" class="to-top" id="toTop" aria-label="回到开头" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button>
+
   <dialog id="collectDialog" aria-labelledby="collectTitle">
     <form id="collectForm">
       <button type="button" class="dialog-close icon-button" id="closeCollect" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
       <p class="kicker">同步歌曲</p>
       <h2 id="collectTitle">把更多初听找回来</h2>
-      <p class="dialog-copy">先从最近播放、听歌排行和喜欢的歌曲里找出歌曲，再逐首查询它们的初听时间。查过的歌会自动跳过。</p>
+      <p class="dialog-copy">先从最近播放、听歌排行、喜欢的歌和歌单里找出歌曲，再逐首查询它们的初听时间。查过的歌会自动跳过。</p>
       <label class="form-field">这次查询多少首
         <select id="batchLimit">
           <option value="200">200 首（推荐）</option>
@@ -101,12 +131,14 @@
           <option value="0">全部未查询的歌曲</option>
         </select>
       </label>
-      <label class="checkbox-row"><input id="includePlaylists" type="checkbox" checked><span>也查找我创建的歌单</span></label>
+      <label class="checkbox-row"><input id="includePlaylists" type="checkbox" checked><span>也从我创建的歌单里找歌</span></label>
       <label class="checkbox-row"><input id="retryEmpty" type="checkbox"><span>重新查询之前没有记录的歌曲</span></label>
       <div id="cloudCollectOptions" hidden>
-        <label class="checkbox-row"><input id="includeHistory" type="checkbox" checked><span>也从历史月榜和年度报告里找歌</span></label>
-        <label class="form-field">历史起始年份<select id="historyFrom"><option value="">自动（根据听歌足迹）</option></select></label>
-        <label class="form-field">同时查询<select id="concurrency"><option value="2">2 首（推荐）</option><option value="1">1 首</option></select></label>
+        <label class="checkbox-row"><input id="includeHistory" type="checkbox" checked><span>也翻一翻历史月榜和年度报告</span></label>
+        <div class="field-row">
+          <label class="form-field">从哪一年翻起<select id="historyFrom"><option value="">自动（按听歌足迹）</option></select></label>
+          <label class="form-field">同时查询<select id="concurrency"><option value="2">2 首（推荐）</option><option value="1">1 首</option></select></label>
+        </div>
       </div>
       <p class="form-hint" id="syncHint">为了不给接口添麻烦，每首之间会停顿约 1 秒。进度随时保存，暂停后可以接着同步。</p>
       <p id="collectError" class="error-text" role="alert"></p>
@@ -115,24 +147,31 @@
   </dialog>
 
   <dialog id="loginDialog" aria-labelledby="loginTitle">
-    <button type="button" class="dialog-close icon-button" id="closeLogin" aria-label="关闭登录">×</button>
+    <button type="button" class="dialog-close icon-button" id="closeLogin" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
     <p class="kicker">连接网易云音乐</p>
-    <h2 id="loginTitle">扫码，把初听找回来</h2>
-    <p class="dialog-copy">用网易云音乐 App 扫码并确认登录。收听档案保存在当前浏览器中。</p>
-    <img id="loginQr" class="login-qr" width="240" height="240" alt="网易云音乐登录二维码" hidden>
-    <p id="loginStatus" role="status">正在生成二维码…</p>
-    <button type="button" class="button ghost" id="refreshQr">刷新二维码</button>
+    <h2 id="loginTitle">扫一扫，把初听找回来</h2>
+    <p class="dialog-copy">打开网易云音乐 App 扫码，并在手机上确认。登录状态加密保存 7 天，档案只留在这台设备。</p>
+    <div class="qr-frame"><img id="loginQr" class="login-qr" width="240" height="240" alt="网易云音乐登录二维码" hidden><span class="qr-placeholder" aria-hidden="true"></span></div>
+    <p id="loginStatus" class="login-status" role="status">正在生成二维码…</p>
+    <button type="button" class="button ghost" id="refreshQr">换一张二维码</button>
   </dialog>
 
   <dialog id="songDialog" aria-labelledby="detailName">
     <button type="button" class="dialog-close icon-button" id="closeSong" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <div class="detail-art" id="detailArt" aria-hidden="true"><span class="detail-disc"></span><span class="detail-cover" id="detailCover"><span id="detailGlyph"></span></span></div>
     <p class="kicker" id="detailKicker">初听档案</p>
     <h2 id="detailName"></h2>
     <p id="detailArtists" class="dialog-copy"></p>
     <dl id="detailFacts"></dl>
-    <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+    <div class="detail-actions">
+      <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+      <span class="detail-nav">
+        <button type="button" class="icon-button" id="prevSong" aria-label="上一首"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5"/></svg></button>
+        <button type="button" class="icon-button" id="nextSong" aria-label="下一首"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
+      </span>
+    </div>
   </dialog>
 
-  <div id="toast" class="toast" role="alert" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>

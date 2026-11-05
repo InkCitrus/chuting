@@ -35,7 +35,7 @@ export class BrowserSync {
       if (!lock) { reject(new Error('另一个标签页正在同步，请在那里暂停')); return }
       try {
         this.uid = account.uid
-        this.run = { status: 'running', phase: '准备同步', queried: 0, found: 0, empty: 0, failed: 0, started_ms: Date.now() }
+        this.run = { status: 'running', phase: '正在准备…', queried: 0, found: 0, empty: 0, failed: 0, started_ms: Date.now() }
         await this.saveRun()
         accept({ ok: true })
         await this.collect(account, { ...options, limit, concurrency })
@@ -159,11 +159,11 @@ export class BrowserSync {
       if (rejected) throw rejected.reason
       if (fatal) throw fatal
       this.run.status = this.stop ? 'paused' : 'completed'
-      this.run.phase = this.stop ? '已暂停，进度已保存' : '本批同步完成'
+      this.run.phase = this.stop ? '已暂停，进度已保存' : '这一批同步好了'
       this.run.error = warnings.length ? warnings.slice(0, 5).join('；') + (warnings.length > 5 ? `；另有 ${warnings.length - 5} 项未读取` : '') : null
     } catch (err) {
       this.run.status = err.message === 'PAUSED' ? 'paused' : 'failed'
-      this.run.phase = '同步已停止，进度已保存'
+      this.run.phase = err.message === 'PAUSED' ? '已暂停，进度已保存' : '同步已停止，进度已保存'
       this.run.error = err.message === 'PAUSED' ? null : err.message
     }
     await this.saveRun()
