@@ -69,6 +69,22 @@ test('QR login returns only account and an encrypted HttpOnly credential', async
 test('transport maps HTTP rate limit and does not expose upstream error', async () => {
   await assert.rejects(callNetease('music_first_listen_info', { id: '1' }, {}, '1', async () => Response.json({ code: 429, message: 'credential-secret' }, { status: 429 })), err => err instanceof ApiError && err.code === 429 && !err.message.includes('secret'))
 })
+test('NetEase risk-control codes are treated as rate limits', async () => {
+  await assert.rejects(callNetease('music_first_listen_info', { id: '1' }, {}, '1', async () => Response.json({ code: -460, message: 'Cheating' })), err => err.code === 429)
+})
+test('song details are trimmed to names and album art before reaching the browser', async () => {
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'fake' } }, secret, 'session', 60)
+  const rpc = async () => ({ body: { code: 200, songs: [{ id: 7, name: 'n', ar: [{ name: 'a', id: 9, alias: [] }], al: { name: 'al', picUrl: 'http://p1.music.126.net/x/1.jpg', pic: 1 }, privilege: { big: 'x' }, mv: 0 }], privileges: [{}] }, cookie: {} })
+  const body = await (await handleApi(req('/api/netease', { uid: '1', method: 'song_detail', query: { ids: '7' } }, 'chuting_session=' + token), env, rpc)).json()
+  assert.deepEqual(body, { code: 200, songs: [{ id: 7, name: 'n', ar: [{ name: 'a' }], al: { name: 'al', picUrl: 'http://p1.music.126.net/x/1.jpg' } }] })
+})
+test('CSP allows album art only from the NetEase image CDN', async () => {
+  const response = await handleApi(new Request(origin + '/api/runtime'), {})
+  const csp = response.headers.get('Content-Security-Policy')
+  assert.match(csp, /img-src 'self' data: https:\/\/\*\.music\.126\.net;/)
+  assert.match(csp, /script-src 'self';/)
+})
 test('transport uses Workers-compatible manual redirects and only fixed official hosts', async () => {
   await callNetease('qr_key', {}, {}, null, async (url, options) => {
     assert.equal(new URL(url).hostname, 'interfacepc.music.163.com')

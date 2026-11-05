@@ -4,7 +4,7 @@ import { seal, unseal, getSession, sessionCookie } from './session.mjs'
 
 export const securityHeaders = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; connect-src 'self' https://*.music.126.net; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 }
 function json(body, status = 200, extra = {}) { return Response.json(body, { status, headers: { ...securityHeaders, 'Cache-Control': 'no-store', ...extra } }) }
 async function input(request) {
@@ -20,6 +20,9 @@ async function input(request) {
   }
   try { const body = JSON.parse(Buffer.concat(chunks).toString()); if (!body || Array.isArray(body) || typeof body !== 'object') throw 0; return body }
   catch { throw new ApiError('JSON 格式错误', 400) }
+}
+export function briefSong(song) {
+  return { id: song.id, name: song.name, ar: (song.ar || []).map(a => ({ name: a.name })), al: { name: song.al?.name || '', picUrl: song.al?.picUrl || '' } }
 }
 // Dependency injection is used by tests, never controlled by HTTP input.
 export async function handleApi(request, env, upstream = callNetease) {
@@ -67,6 +70,8 @@ export async function handleApi(request, env, upstream = callNetease) {
       if (!p?.userId || String(p.userId) !== session.account.uid) throw new ApiError('登录账号已改变，请重新连接', 401)
       return json({ account: { uid: String(p.userId), nickname: String(p.nickname || p.userId) } })
     }
+    // Song details are only used for names and album art: trim ~1–2 KB per song down to what is stored.
+    if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })
     // Upstream payload is returned only to this authenticated browser; never cached/logged.
     return json(result.body)
   } catch (error) {

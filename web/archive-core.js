@@ -1,6 +1,13 @@
 export const SOURCE = '/music/first/listen/info'
 export const DAY = 86400000
 export const validId = value => /^[1-9]\d{0,17}$/.test(String(value))
+// Album art lives on NetEase's image CDN (p1–p4.music.126.net, CORS-enabled). Anything else is dropped,
+// and plain http is upgraded so the page never loads mixed content.
+export function coverUrl(value) {
+  const m = /^(?:https?:)?\/\/(p\d{1,2}\.music\.126\.net)\/([\w\-=./]{1,200})(?:\?.*)?$/.exec(String(value || ''))
+  return m ? `https://${m[1]}/${m[2]}` : ''
+}
+export const coverSize = (url, px) => url ? `${url}?param=${px}y${px}` : ''
 export function timestamp(value, now = Date.now()) {
   if (typeof value === 'boolean' || !/^\d+$/.test(String(value))) throw new Error('初听时间格式异常')
   const n = Number(value)
@@ -14,15 +21,24 @@ export function parseFirst(body, songId, now = Date.now()) {
   if ([null, undefined, 0, '0', ''].includes(first.listenTime)) return null
   return { first_listen_ms: timestamp(first.listenTime, now), source: SOURCE, captured_ms: now,
     upstream_date: first.date || null, name: info.songName || '', artists: info.singer || '',
-    play_count: data.musicTotalPlayDto?.playCount ?? null }
+    play_count: data.musicTotalPlayDto?.playCount ?? null, ...peak(data) }
+}
+// "The day you played it most": one day and its play count, as reported by NetEase. Not a full play log.
+export function peak(data) {
+  const most = data?.musicPlayMostDto || {}, count = Number(most.mostPlayedCount)
+  if (!Number.isSafeInteger(count) || count < 1) return {}
+  let at = null
+  try { at = timestamp(most.timestamp) } catch {}
+  return { peak_count: count, peak_ms: at }
 }
 export function metadata(song) {
   const id = song?.songId ?? song?.id
   if (!validId(id)) return null
   const artists = song.ar || song.artists || []
+  const album = song.al || song.album
   return { id: String(id), name: song.songName || song.name || '',
     artists: typeof artists === 'string' ? artists : artists.map(a => a.name || a.artistName || '').filter(Boolean).join(' / ') || song.artistName || song.artistNameList || '',
-    album: (song.al || song.album)?.name || song.albumName || '' }
+    album: album?.name || song.albumName || '', cover: coverUrl(album?.picUrl || song.coverUrl || song.picUrl) }
 }
 // Only explicit song objects are accepted: never recurse arbitrary `id` fields.
 export function reportSongs(value) {
@@ -47,6 +63,7 @@ export function mergeResult(song, parsed, body, now = Date.now()) {
     if (parsed.name) song.name = parsed.name
     if (parsed.artists) song.artists = parsed.artists
     if (parsed.play_count != null) song.play_count = parsed.play_count
+    if (parsed.peak_count) Object.assign(song, { peak_count: parsed.peak_count, peak_ms: parsed.peak_ms })
   }
   song.status = song.observations.length > 1 ? 'conflict' : song.first_listen_ms ? 'available' : 'empty'
   return song
@@ -56,7 +73,10 @@ export function needsQuery(song, retryEmpty = false, now = Date.now()) {
   return song.status !== 'empty' || retryEmpty || now - (song.last_attempt_ms || 0) >= 30 * DAY
 }
 export function eventFromSong(song) {
-  const { raw, id, ...event } = song
+  const { raw, id, uid, error, ...event } = song
+  // Archives synced before peak_* existed still carry the original response.
+  if (event.peak_count == null && raw?.data) Object.assign(event, peak(raw.data))
+  event.cover = coverUrl(event.cover)
   const iso = new Date(song.first_listen_ms + 8 * 3600000).toISOString()
   return { ...event, song_id: id, date: iso.slice(0, 10), time: iso.slice(11, 16),
     timestamp_local: iso.slice(0, -1) + '+08:00', timezone: 'Asia/Shanghai', kind: 'first_listen',
@@ -71,6 +91,7 @@ export function archiveStatus(songs) {
       available: events.length, pending: songs.filter(s => ['pending', 'failed'].includes(s.status)).length,
       empty: songs.filter(s => s.status === 'empty').length, failed: songs.filter(s => s.status === 'failed').length,
       conflicts: songs.filter(s => s.observations?.length > 1).length,
+      missing_covers: songs.filter(s => s.first_listen_ms && !s.cover && !s.cover_checked_ms).length,
       sources: [...sourceCounts].map(([source, count]) => ({ source, count })) },
     calendar: { months: [...new Set(events.map(e => e.date.slice(0, 7)))], days: new Set(events.map(e => e.date)).size,
       earliest: events[0]?.date, latest: events.at(-1)?.date } }

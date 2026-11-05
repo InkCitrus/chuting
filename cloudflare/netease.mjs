@@ -91,7 +91,9 @@ export async function callNetease(method, query, cookie = {}, uid, fetcher = fet
       body: new URLSearchParams(encrypted).toString() })
     body = await response.json()
   } catch { throw new ApiError('网易接口连接失败或超时，请稍后重试', 503) }
-  const code = Number(body.code || response.status)
+  let code = Number(body.code || response.status)
+  // NetEase answers risk control with -460/-462 in an HTTP 200 body: treat it like a rate limit.
+  if ([-460, -462].includes(code)) code = 429
   if ((!response.ok || code !== 200) && !(method === 'qr_check' && [800, 801, 802, 803].includes(code))) {
     throw new ApiError([301, 401].includes(code) ? '登录已失效，请重新扫码' : [403, 429, 460].includes(code) ? '接口请求受限，请稍后再同步' : '网易接口暂时没有返回有效结果', code)
   }

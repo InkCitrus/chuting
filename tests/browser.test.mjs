@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import 'fake-indexeddb/auto'
 import { BrowserStore } from '../web/browser-store.js'
 import { BrowserSync } from '../web/browser-sync.js'
-import { parseFirst, needsQuery, reportSongs, monthEnds, csv, DAY } from '../web/archive-core.js'
+import { parseFirst, needsQuery, reportSongs, monthEnds, csv, coverUrl, metadata, eventFromSong, DAY } from '../web/archive-core.js'
+import { insights } from '../web/insights.js'
 const account = { uid: '1', nickname: 'Test' }, stamp = 1709991108310
 const response = (id, ms = stamp) => ({ code: 200, data: { songInfoDto: { songId: id, songName: "and I'm home", singer: 'Test' }, musicFirstListenDto: { listenTime: ms }, musicTotalPlayDto: { playCount: 162 } } })
 async function store() { return new BrowserStore('test-' + crypto.randomUUID()).open() }
@@ -84,10 +85,10 @@ test('bounded parallel collection retries transient errors and resumes without d
   assert.equal(requests.length, before)
   db.db.close()
 })
-test('rate limiting stops both lanes and records final state after in-flight writes', async () => {
+test('rate limiting slows down and retries, then stops all lanes and records final state', async () => {
   const db = await store(); await db.account(account)
   await db.candidates('1', [10, 11, 12, 13].map(id => ({ id, name: 'song' })), 'test')
-  let count = 0
+  let count = 0, waited = []
   const sync = new BrowserSync(db, async (method, query) => {
     if (method === 'login_status') return { account }
     if (method === 'music_first_listen_info') {
@@ -97,14 +98,90 @@ test('rate limiting stops both lanes and records final state after in-flight wri
       return response(query.id)
     }
     return { data: {}, ids: [], allData: [], weekData: [] }
-  }, { interval: 0, wait: async () => {} })
+  }, { interval: 0, cooldown: 1000, wait: async ms => { waited.push(ms) } })
   await sync.start(account, { concurrency: 2, limit: 0 }); await sync.task
-  assert.ok(count <= 2)
+  // Two slower retries with a cool-down for the throttled song, never a burst.
+  assert.ok(waited.includes(1000) && waited.includes(2000))
+  assert.ok(sync.interval >= 900)
+  assert.ok(count <= 7)
   const status = await db.status(account)
   assert.equal(status.run.status, 'failed')
-  assert.equal(status.stats.available, 1)
+  assert.ok(status.stats.available >= 1)
   assert.equal(status.stats.failed, 1)
   db.db.close()
+})
+test('a single rate-limit answer only slows the run down; it still finishes', async () => {
+  const db = await store(); await db.account(account)
+  await db.candidates('1', [10, 11, 12].map(id => ({ id, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), 'test')
+  let limited = false
+  const sync = new BrowserSync(db, async (method, query) => {
+    if (method === 'login_status') return { account }
+    if (method === 'music_first_listen_info') {
+      if (query.id === '11' && !limited) { limited = true; throw Object.assign(new Error('limited'), { code: 429 }) }
+      return response(query.id)
+    }
+    return { data: {}, ids: [], allData: [], weekData: [] }
+  }, { interval: 100, wait: async () => {} })
+  await sync.start(account, { concurrency: 3, limit: 0 }); await sync.task
+  const status = await db.status(account)
+  assert.equal(status.run.status, 'completed')
+  assert.equal(status.stats.available, 3)
+  assert.ok(sync.interval > 100)
+  db.db.close()
+})
+test('album art: URLs are validated, stored from song lists, and backfilled in batches', async () => {
+  assert.equal(coverUrl('http://p2.music.126.net/a-b==/1099.jpg?param=40y40'), 'https://p2.music.126.net/a-b==/1099.jpg')
+  for (const bad of ['https://evil.example/p1.music.126.net/x.jpg', 'javascript:alert(1)', 'https://p1.music.126.net.evil.example/x.jpg']) assert.equal(coverUrl(bad), '')
+  assert.equal(metadata({ id: 5, name: 's', ar: [{ name: 'a' }], al: { name: 'al', picUrl: 'http://p1.music.126.net/c/2.jpg' } }).cover, 'https://p1.music.126.net/c/2.jpg')
+  const db = await store(); await db.account(account)
+  await db.candidates('1', [{ id: '20', name: 'a' }, { id: '21', name: 'b' }], 'test')
+  await db.result('1', '20', response('20')); await db.result('1', '21', response('21'))
+  assert.equal((await db.status(account)).stats.missing_covers, 2)
+  const asked = []
+  const sync = new BrowserSync(db, async (method, query) => {
+    if (method === 'login_status') return { account }
+    if (method === 'song_detail') { asked.push(query.ids); return { songs: [{ id: 20, name: 'a', al: { picUrl: 'http://p1.music.126.net/z/3.jpg' } }] } }
+    throw new Error(method)
+  }, { interval: 0, wait: async () => {} })
+  await sync.start(account, { covers_only: true }); await sync.task
+  assert.equal(asked.length, 1)
+  const songs = await db.songs('1')
+  assert.equal(songs.find(s => s.id === '20').cover, 'https://p1.music.126.net/z/3.jpg')
+  assert.ok(songs.find(s => s.id === '21').cover_checked_ms)
+  assert.equal((await db.status(account)).stats.missing_covers, 0)
+  db.db.close()
+})
+test('peak day is read from the response and from archives that only kept the raw body', () => {
+  const body = response('1'); body.data.musicPlayMostDto = { timestamp: stamp + DAY, mostPlayedCount: 12 }
+  assert.deepEqual([parseFirst(body, '1').peak_count, parseFirst(body, '1').peak_ms], [12, stamp + DAY])
+  const event = eventFromSong({ id: '1', first_listen_ms: stamp, raw: body })
+  assert.equal(event.peak_count, 12)
+  assert.equal(event.raw, undefined)
+})
+test('in-memory song cache follows writes, including writes from another tab', async () => {
+  const name = 'test-' + crypto.randomUUID()
+  const a = await new BrowserStore(name).open(), b = await new BrowserStore(name).open()
+  await a.account(account)
+  await a.candidates('1', [{ id: '30', name: 'x' }], 'test')
+  assert.equal((await a.songs('1')).length, 1)
+  await b.candidates('1', [{ id: '31', name: 'y' }], 'test')
+  await new Promise(r => setTimeout(r, 20))
+  assert.equal((await a.songs('1')).length, 2)
+  await a.result('1', '30', response('30'))
+  assert.equal((await a.songs('1')).find(s => s.id === '30').status, 'available')
+  a.db.close(); b.db.close(); a.channel?.close(); b.channel?.close()
+})
+test('highlights only claim what the data supports', () => {
+  const ev = (id, date, time, extra = {}) => ({ song_id: id, name: 'song ' + id, artists: 'A', date, time, ...extra })
+  const plain = [ev('1', '2024-01-01', '02:10'), ev('2', '2024-01-02', '15:00'), ev('3', '2024-01-03', '21:00'), ev('4', '2024-02-01', '09:00'), ev('5', '2024-02-02', '03:30')]
+  const ids = insights(plain).map(i => i.id)
+  assert.ok(ids.includes('earliest') && ids.includes('streak') && ids.includes('artist'))
+  assert.ok(!ids.includes('most-played') && !ids.includes('afternoon'), 'no play counts, no play-based claims')
+  const counted = insights(plain.map((e, i) => ({ ...e, play_count: [5, 40, 3, 9, 7][i] })))
+  assert.equal(counted.find(i => i.id === 'most-played').event.song_id, '2')
+  const afternoon = counted.find(i => i.id === 'afternoon')
+  assert.ok(!afternoon || afternoon.event.song_id !== '2', 'a song is featured once')
+  assert.match(counted.find(i => i.id === 'late-night').kicker, /深夜遇见/)
 })
 test('history scans persist checkpoints and only add candidates, never report dates', async () => {
   const db = await store(); await db.account(account)
@@ -144,4 +221,24 @@ test('pausing leaves work pending and a fresh collector can resume it', async ()
   assert.equal((await reopened.status(account)).stats.available, 1)
   assert.equal((await reopened.songs('1')).filter(s => needsQuery(s)).length, 2)
   reopened.db.close()
+})
+test('recent songs are dated before the long history scan runs', async () => {
+  const db = await store(); await db.account(account)
+  const order = []
+  const rpc = async (method, query) => {
+    order.push(method === 'music_first_listen_info' ? 'q' + query.id : method)
+    if (method === 'login_status') return { account }
+    if (method === 'record_recent_song') return { data: { list: [{ data: { id: 20, name: 'recent', ar: [{ name: 'a' }], al: { name: 'b', picUrl: 'https://p1.music.126.net/x.jpg' } } }] } }
+    if (method === 'listen_data_song_play_rank') return { data: { songItems: [{ songId: 21, songName: 'older', firstDate: stamp }] } }
+    if (method === 'song_detail') return { songs: [] }
+    if (method === 'music_first_listen_info') return response(query.id)
+    return {}
+  }
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (_n, _o, work) => work({}) } } })
+  const sync = new BrowserSync(db, rpc, { interval: 0, wait: async () => {} })
+  await sync.start(account, { concurrency: 2, limit: 0, history: true, history_from: new Date().getFullYear() }); await sync.task
+  assert.ok(order.indexOf('q20') < order.indexOf('listen_data_song_play_rank'))
+  assert.ok(order.indexOf('q21') > order.indexOf('listen_data_song_play_rank'))
+  assert.equal(sync.run.status, 'completed'); assert.equal(sync.run.queried, 2); assert.equal(sync.run.total, 2)
+  db.db.close()
 })
