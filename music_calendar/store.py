@@ -118,7 +118,7 @@ class Store:
         states = "'pending','failed'" + (",'empty'" if retry_empty else "")
         with self.connection() as db:
             return [dict(r) for r in db.execute(
-                "SELECT * FROM candidates WHERE uid=? AND status IN (" + states + ") ORDER BY attempts, CASE WHEN name!='' THEN 0 ELSE 1 END, CAST(song_id AS INTEGER) LIMIT ?", (str(uid), limit))]
+                "SELECT * FROM candidates WHERE uid=? AND (status IN (" + states + ") OR (status='empty' AND last_attempt_ms<=?)) ORDER BY attempts, CASE WHEN name!='' THEN 0 ELSE 1 END, CAST(song_id AS INTEGER) LIMIT ?", (str(uid), now_ms() - 30 * 86400000, limit))]
 
     def save_result(self, uid, sid, body):
         uid, sid = str(uid), str(sid)

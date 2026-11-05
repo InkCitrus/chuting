@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 .session/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
 .secrets/
 cookies.json
 cookies.txt

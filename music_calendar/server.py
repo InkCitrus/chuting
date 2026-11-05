@@ -87,6 +87,8 @@ def make_handler(app):
             url = urlsplit(self.path)
             query = parse_qs(url.query)
             try:
+                if url.path == "/api/runtime":
+                    return self.send(200, {"storage": "sqlite"})
                 if url.path == "/api/status":
                     return self.send(200, app.status())
                 if url.path in ("/api/events", "/api/export"):
@@ -110,6 +112,8 @@ def make_handler(app):
                         return self.send(200, "\ufeff" + output.getvalue(), "text/csv; charset=utf-8", "first-listens.csv")
                     return self.send(200, {"account": account, "kind": "first_listen", "timezone": "Asia/Shanghai", "coverage": app.store.stats(account["uid"]), "events": records}, filename="first-listens.json")
                 files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8")}
+                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js"):
+                    files["/" + name] = (name, "text/javascript; charset=utf-8")
                 if url.path in files:
                     file, mime = files[url.path]
                     return self.send(200, (WEB / file).read_bytes(), mime)

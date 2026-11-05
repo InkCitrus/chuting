@@ -1,4 +1,6 @@
 'use strict'
+import { createBackend, remote } from './backend.js'
+const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
 const MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
@@ -39,11 +41,7 @@ function sentence(target, pieces) {
   target.replaceChildren(...pieces.map(p => Array.isArray(p) ? node('b', p[1] || 'num', p[0]) : document.createTextNode(p)))
 }
 async function api(path, body) {
-  const response = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  let result = {}
-  try { result = await response.json() } catch { if (response.ok) throw new Error('收到了无法识别的响应，请刷新页面重试') }
-  if (!response.ok) throw new Error(result.error || '操作没有完成，请稍后再试')
-  return result
+  return (await backendReady).api(path, body)
 }
 function toast(message) {
   $('toast').textContent = message
@@ -107,7 +105,7 @@ function renderStatus() {
     sub.textContent = '正在翻开你的初听…'
   } else if (!state.account) {
     sentence(story, ['每首歌，都有第一次听见的那天。', ['连接网易云音乐', 'mark'], '，把它们一首首找回来，写成你自己的时间线。'])
-    sub.textContent = '数据只保存在这台电脑上，登录只在同步时用到。'
+    sub.textContent = state.local ? '档案保存在当前浏览器中。已有本地档案可在页底导入。' : '数据只保存在这台电脑上，登录只在同步时用到。'
     action.textContent = '连接网易云音乐'; action.hidden = false; action.dataset.action = 'connect'
   } else if (!stats.available) {
     sentence(story, ['故事还没开始。', ['同步一批歌曲', 'mark'], '，看看你和它们是哪天遇见的。'])
@@ -384,8 +382,48 @@ async function loadStatus(force = false) {
 async function connect() {
   $('connectButton').disabled = true
   $('connectButton').textContent = '连接中…'
-  try { await api('/api/connect', {}); state.initialized = false; await loadStatus(true); toast('已连接，数据只保存在这台电脑上') }
+  try {
+    const backend = await backendReady
+    if (backend.local) {
+      if (!backend.configured) throw new Error('部署者尚未配置 SESSION_SECRET，仍可导入并浏览本地档案')
+      if (backend.sync.task) throw new Error('请先暂停同步，再连接账号')
+      await backend.connect(await qrLogin())
+    } else await api('/api/connect', {})
+    state.initialized = false; await loadStatus(true); toast('已连接，档案保存在本地')
+  }
   catch (err) { toast(err.message); renderStatus() }
+}
+function qrLogin() {
+  const dialog = $('loginDialog')
+  dialog.showModal()
+  return new Promise((resolve, reject) => {
+    let ticket, timer, generation = 0, done = false
+    const cleanup = () => { done = true; clearTimeout(timer); $('refreshQr').removeEventListener('click', refresh); dialog.removeEventListener('close', cancel) }
+    const cancel = () => { cleanup(); reject(new Error('已取消连接')) }
+    dialog.addEventListener('close', cancel, { once: true })
+    async function poll(version) {
+      if (done || generation !== version) return
+      try {
+        const result = await remote('/api/auth/check', { ticket })
+        if (done || generation !== version) return
+        if (result.code === 803) { cleanup(); dialog.close(); resolve(result.account); return }
+        $('loginStatus').textContent = result.code === 802 ? '已扫码，请在网易云 App 中确认' : result.code === 800 ? '二维码已过期，请刷新' : '等待扫码…'
+        if (result.code !== 800) timer = setTimeout(() => poll(version), 2500)
+      } catch (err) { if (!done && generation === version) $('loginStatus').textContent = err.message + '，可刷新二维码重试' }
+    }
+    async function refresh() {
+      const version = ++generation
+      clearTimeout(timer); $('loginQr').hidden = true; $('loginStatus').textContent = '正在生成二维码…'
+      try {
+        const result = await remote('/api/auth/key', {})
+        if (done || generation !== version) return
+        ticket = result.ticket; $('loginQr').src = result.image; $('loginQr').hidden = false; $('loginStatus').textContent = '等待扫码…'
+        timer = setTimeout(() => poll(version), 2500)
+      } catch (err) { if (!done && generation === version) $('loginStatus').textContent = err.message }
+    }
+    $('refreshQr').addEventListener('click', refresh)
+    refresh()
+  })
 }
 function openCollect() {
   if (!state.account) { connect().then(() => { if (state.account) $('collectDialog').showModal() }); return }
@@ -439,7 +477,8 @@ $('collectForm').addEventListener('submit', async event => {
   $('startCollect').disabled = true
   $('collectError').textContent = ''
   try {
-    await api('/api/sync', { limit: Number($('batchLimit').value), playlists: $('includePlaylists').checked, retry_empty: $('retryEmpty').checked })
+    await api('/api/sync', { limit: Number($('batchLimit').value), playlists: $('includePlaylists').checked, retry_empty: $('retryEmpty').checked,
+      history: $('includeHistory').checked, history_from: $('historyFrom').value, concurrency: Number($('concurrency').value) })
     $('collectDialog').close(); await loadStatus(true)
   } catch (err) { $('collectError').textContent = err.message; $('startCollect').disabled = false }
 })
@@ -447,7 +486,40 @@ $('pauseButton').addEventListener('click', async () => {
   try { await api('/api/sync/pause', {}); toast('正在暂停，当前这首查完就停，进度会保存'); await loadStatus() }
   catch (err) { toast(err.message) }
 })
-for (const id of ['exportJson', 'exportCsv']) $(id).addEventListener('click', e => { if (!state.account) { e.preventDefault(); toast('请先连接网易云音乐账号') } })
+$('closeLogin').addEventListener('click', () => $('loginDialog').close())
+$('importButton').addEventListener('click', () => $('importFile').click())
+$('importQuick').addEventListener('click', () => $('importFile').click())
+$('backupQuick').addEventListener('click', async () => {
+  try { await (await backendReady).download('json') } catch (err) { toast(err.message) }
+})
+$('importFile').addEventListener('change', async event => {
+  const file = event.target.files[0]
+  if (!file) return
+  try {
+    if (file.size > 25 * 1024 * 1024) throw new Error('档案超过 25 MB，请拆分后导入')
+    toast('正在导入档案，请稍候…')
+    await (await backendReady).import(JSON.parse(await file.text()))
+    state.initialized = false; await loadStatus(true); toast('档案已导入当前浏览器')
+  } catch (err) { toast(err.message) }
+  event.target.value = ''
+})
+for (const id of ['exportJson', 'exportCsv']) $(id).addEventListener('click', async e => {
+  e.preventDefault()
+  const href = e.currentTarget.href
+  if (!state.account) { e.preventDefault(); toast('请先连接或导入档案'); return }
+  try { const backend = await backendReady; if (backend.local) await backend.download(id === 'exportCsv' ? 'csv' : 'json'); else location.href = href }
+  catch (err) { e.preventDefault(); toast(err.message) }
+})
+backendReady.then(backend => {
+  if (!backend.local) return
+  state.local = true
+  $('importQuick').hidden = false; $('backupQuick').hidden = false
+  $('importButton').hidden = false; $('cloudCollectOptions').hidden = false
+  $('exportJson').textContent = '备份 JSON'
+  $('storageNote').textContent = '档案保存在当前浏览器 · 建议定期备份 · 时间按北京时间显示'
+  $('syncHint').textContent = '默认同时查 2 首，发起请求间隔至少 0.65 秒。网络错误会退避重试，限流立即停止。空结果满 30 天自动补查。关闭页面后暂停，再打开可继续。'
+  for (let y = new Date().getFullYear(); y >= 2017; y--) { const option = node('option', '', String(y)); option.value = String(y); $('historyFrom').append(option) }
+}).catch(() => {})
 renderStatus(); renderTimeline()
-loadStatus(true).then(() => { if (!state.account) connect() }).catch(err => { state.loading = false; state.error = err.message; renderStatus(); renderTimeline(); toast(err.message) })
+loadStatus(true).then(async () => { if (!state.account && !(await backendReady).local) connect() }).catch(err => { state.loading = false; state.error = err.message; renderStatus(); renderTimeline(); toast(err.message) })
 setInterval(() => loadStatus().catch(() => {}), 5000)

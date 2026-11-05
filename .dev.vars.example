@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local Wrangler only. In production use wrangler secret put.
+SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters

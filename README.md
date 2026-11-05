@@ -2,13 +2,13 @@
 
 每首歌，都有第一次听见的那天。
 
-「初听」读取网易云音乐「回忆坐标」里的初听时间，把每首歌放回你第一次听到它的那一天，做成一本可以翻看的月历。它运行在你自己的电脑上，数据只存在本机。
+「初听」读取网易云音乐「回忆坐标」里的初听时间，把每首歌放回你第一次听到它的那一天，做成一本可以翻看的月历。支持本机 SQLite 版和 Cloudflare 浏览器存储版，档案保存在用户本地。
 
 > 初听日历只记录每首歌的**第一次**播放，不是你每天完整的听歌记录。
 
 ## 能做什么
 
-- **按月翻看**：日历格子的颜色越深，那天遇见的新歌越多；点开某一天，按时间（精确到分钟）列出当天第一次听到的歌。
+- **按月翻看**：按月份、日期展开歌曲，精确到分钟；支持最新在前、从头讲起和月份跳转。
 - **搜索**：跨所有月份搜索歌名或歌手。
 - **歌曲详情**：初听时间、累计播放次数、数据来源，以及原始毫秒时间戳；多次查询结果不一致时也会标出来。
 - **同步歌曲**：从最近播放、听歌排行、喜欢的歌曲和你创建的歌单里找出歌曲，再逐首查询初听时间。可以分批或一次全部同步，随时暂停、接着同步，失败的歌曲下次会自动重试。
@@ -16,13 +16,30 @@
 - **导出**：JSON / CSV，保留原始毫秒时间戳和时区。
 - **浅色 / 深色**：跟随系统外观自动切换，手机上也能正常浏览。
 
-## 快速开始
+## Cloudflare 版（本地优先）
+
+页面和只读代理运行在 Cloudflare，候选、歌曲和进度保存在当前浏览器的 IndexedDB。不需要 R2、D1 或 KV。关闭页面后暂停，下次打开可继续；换浏览器或域名时用 JSON 备份迁移。
+
+```sh
+npm ci
+cp .dev.vars.example .dev.vars
+# 把 SESSION_SECRET 换成至少 32 字符的随机密钥
+npm run dev:cloudflare
+```
+
+打开 <http://127.0.0.1:8787>，使用网易云 App 扫码连接，或在页底导入已有档案。默认同时查 2 首，请求发起间隔至少 650ms，可以切回单请求。历史月榜和年度报告只用来发现候选，初听仍逐首查询「回忆坐标」。
+
+支持 Workers Static Assets 和 Pages Functions，完整部署和迁移步骤见 [Cloudflare 说明](docs/CLOUDFLARE.md)。
+
+GitHub Actions 会自动运行测试、构建；合并到 `main` 后发布至 Cloudflare Pages。生产域名：<https://chuting.inkorange.com>。
+
+## 本机版快速开始
 
 需要 macOS 或 Linux、Python 3.9+（含时区数据）和 Node.js 22+。
 
 ```sh
-git clone https://github.com/InkCitrus/netease-listening-archive.git
-cd netease-listening-archive
+git clone https://github.com/InkCitrus/chuting.git
+cd chuting
 npm ci --ignore-scripts
 npm start
 ```
@@ -50,7 +67,7 @@ python3 -m music_calendar sync --limit 0                   # 查询全部未查�
 python3 -m music_calendar sync --limit 200 --retry-empty   # 同时重查之前没有记录的歌曲
 ```
 
-加 `--no-playlists` 可以跳过你创建的歌单。每次同步都会重新查找新增的歌曲；查询失败的歌曲下次会自动重试，之前没有记录的歌曲需要勾选「重新查询」或加 `--retry-empty`。
+加 `--no-playlists` 可以跳过你创建的歌单。每次同步都会重新查找新增的歌曲；查询失败的歌曲下次会自动重试，空结果满 30 天自动补查，也可勾选「重新查询」或加 `--retry-empty` 提前补查。网络和临时服务错误最多重试 2 次，限流立即停止。本机版保持串行。
 
 ## 数据保存在哪里
 
