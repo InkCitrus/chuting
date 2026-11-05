@@ -4,8 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f5f2ec" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f2ec">
   <title>初听 · 每首歌第一次响起的那天</title>
   <meta name="description" content="把网易云音乐里每首歌第一次听见的时间，排成一条可以慢慢翻看的时间线。档案只保存在你的浏览器里。">
   <meta property="og:type" content="website">
@@ -16,6 +15,7 @@
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="preconnect" href="https://p1.music.126.net" crossorigin>
   <link rel="preconnect" href="https://p2.music.126.net" crossorigin>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/styles.css">
   <link rel="modulepreload" href="/backend.js">
   <link rel="modulepreload" href="/browser-store.js">
@@ -39,9 +39,9 @@
         <span class="brand-name">初听</span>
       </a>
       <div class="bar-actions">
-        <span id="accountLabel" class="account-label" hidden></span>
+        <span id="accountLabel" class="account-label" hidden><img id="accountAvatar" class="account-chip-avatar" alt="" hidden referrerpolicy="no-referrer" decoding="async"><span id="accountName"></span></span>
         <button type="button" class="button primary" id="barAction">连接网易云</button>
-        <button type="button" class="icon-button gear" id="settingsButton" aria-label="设置、备份与导入" aria-haspopup="dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 1.8v2.1M10 16.1v2.1M18.2 10h-2.1M3.9 10H1.8M15.8 4.2l-1.5 1.5M5.7 14.3l-1.5 1.5M15.8 15.8l-1.5-1.5M5.7 5.7 4.2 4.2"/></svg></button>
+        <button type="button" class="icon-button gear" id="settingsButton" aria-label="设置" aria-haspopup="dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M8.15 2.6h3.7l.42 1.55c.55.16 1.07.4 1.54.72l1.5-.55 1.85 1.85-.55 1.5c.32.47.56.99.72 1.54L19.4 8.15v3.7l-1.55.42a6.1 6.1 0 0 1-.72 1.54l.55 1.5-1.85 1.85-1.5-.55a6.1 6.1 0 0 1-1.54.72l-.42 1.55H8.15l-.42-1.55a6.1 6.1 0 0 1-1.54-.72l-1.5.55-1.85-1.85.55-1.5a6.1 6.1 0 0 1-.72-1.54L.6 11.85v-3.7l1.55-.42c.16-.55.4-1.07.72-1.54l-.55-1.5L4.17 2.84l1.5.55c.47-.32.99-.56 1.54-.72z"/></svg></button>
       </div>
     </div>
   </header>
@@ -137,6 +137,14 @@
       <h3 id="setAccountTitle">账号</h3>
       <div class="account-card"><span class="avatar" id="setAvatar" aria-hidden="true">初</span><span class="account-text"><b id="setName">还没有连接</b><span id="setState">扫一下，你喜欢的歌就会自己排好队</span></span></div>
       <div class="set-actions"><button type="button" class="button ghost" id="setLogin">扫码登录</button><button type="button" class="text-button" id="setLogout" hidden>退出登录</button></div>
+    </section>
+    <section class="set-group" aria-labelledby="setAppearanceTitle">
+      <h3 id="setAppearanceTitle">外观</h3>
+      <div class="segmented thirds" id="themeSeg" role="radiogroup" aria-label="外观">
+        <button type="button" id="themeSystem" data-theme-opt="system" aria-pressed="true">跟随系统</button>
+        <button type="button" id="themeLight" data-theme-opt="light" aria-pressed="false">浅色</button>
+        <button type="button" id="themeDark" data-theme-opt="dark" aria-pressed="false">深色</button>
+      </div>
     </section>
     <section class="set-group" id="setSync" aria-labelledby="setSyncTitle">
       <h3 id="setSyncTitle">同步</h3>

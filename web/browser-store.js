@@ -48,9 +48,13 @@ export class BrowserStore {
   }
   async account(account) {
     if (!validId(account?.uid)) throw new Error('账号格式不正确')
-    account = { uid: String(account.uid), nickname: String(account.nickname || account.uid) }
+    const next = { uid: String(account.uid), nickname: String(account.nickname || account.uid) }
+    if (account.avatarUrl) next.avatarUrl = String(account.avatarUrl)
+    account = next
     await this.transact(['settings', 'accounts'], 'readwrite', async tx => {
       const accounts = tx.objectStore('accounts'), old = await request(accounts.get(account.uid))
+      // Keep a previously stored avatar if this payload omitted one (e.g. status probe).
+      if (!account.avatarUrl && old?.account?.avatarUrl) account.avatarUrl = old.account.avatarUrl
       accounts.put({ ...old, uid: account.uid, account })
       tx.objectStore('settings').put({ key: 'active', value: account.uid })
     })
@@ -185,10 +189,10 @@ export class BrowserStore {
       if (complete) for (const [k, v] of Object.entries(data.checkpoints || {})) {
         if (/^(month:\d{4}-(0[1-9]|1[0-2])|annual:\d{4})$/.test(k) && Number.isSafeInteger(v) && v > 0 && v <= Date.now()) checkpoints[k] = Math.max(v, checkpoints[k] || 0)
       }
-      accounts.put({ ...old, uid, account: { uid, nickname: String(account.nickname || uid) }, checkpoints })
+      accounts.put({ ...old, uid, account: { uid, nickname: String(account.nickname || uid), ...(account.avatarUrl ? { avatarUrl: String(account.avatarUrl) } : {}) }, checkpoints })
       tx.objectStore('settings').put({ key: 'active', value: uid })
     })
     this.cache.delete(uid); this.version++; this.channel?.postMessage({ uid })
-    return { uid, nickname: String(account.nickname || uid) }
+    return { uid, nickname: String(account.nickname || uid), ...(account.avatarUrl ? { avatarUrl: String(account.avatarUrl) } : {}) }
   }
 }

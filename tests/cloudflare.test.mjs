@@ -57,12 +57,12 @@ test('session status probe answers without a session instead of failing', async 
 test('QR login returns only account and an encrypted HttpOnly credential', async () => {
   const rpc = async method => method === 'qr_key' ? { body: { unikey: 'qr-fixture' } }
     : method === 'qr_check' ? { body: { code: 803 }, cookie: { MUSIC_U: 'sensitive-fixture' } }
-      : { body: { profile: { userId: 1, nickname: 'Test' } } }
+      : { body: { profile: { userId: 1, nickname: 'Test', avatarUrl: 'http://p1.music.126.net/abc/avatar.jpg?param=200y200' } } }
   const env = { SESSION_SECRET: secret }
   const keyResponse = await handleApi(req('/api/auth/key'), env, rpc), key = await keyResponse.json()
   assert.match(key.image, /^data:image\/svg\+xml/)
   const login = await handleApi(req('/api/auth/check', { ticket: key.ticket }), env, rpc)
-  assert.deepEqual(await login.json(), { code: 803, account: { uid: '1', nickname: 'Test' } })
+  assert.deepEqual(await login.json(), { code: 803, account: { uid: '1', nickname: 'Test', avatarUrl: 'https://p1.music.126.net/abc/avatar.jpg' } })
   assert.ok(!login.headers.get('Set-Cookie').includes('sensitive-fixture'))
   assert.match(login.headers.get('Cache-Control'), /no-store/)
 })
@@ -128,4 +128,12 @@ test('player endpoint asks NetEase for one song at a bounded quality level', () 
 test('CSP lets audio play only from the NetEase CDN', async () => {
   const csp = (await handleApi(new Request(origin + '/api/runtime'), {})).headers.get('Content-Security-Policy')
   assert.match(csp, /media-src 'self' https:\/\/\*\.music\.126\.net;/)
+})
+
+test('avatarUrl is forwarded from login_status and stripped of query params', async () => {
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1', nickname: 'Test' }, cookie: { MUSIC_U: 'fake' } }, secret, 'session', 60)
+  const rpc = async () => ({ body: { profile: { userId: 1, nickname: 'Test', avatarUrl: '//p2.music.126.net/x/y.png?param=1' } }, cookie: {} })
+  const body = await (await handleApi(req('/api/netease', { uid: '1', method: 'login_status' }, 'chuting_session=' + token), env, rpc)).json()
+  assert.deepEqual(body, { account: { uid: '1', nickname: 'Test', avatarUrl: 'https://p2.music.126.net/x/y.png' } })
 })

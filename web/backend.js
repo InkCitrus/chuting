@@ -35,6 +35,8 @@ export async function createBackend() {
   // Sorting thousands of songs into events is reused until the store changes.
   let memo = { key: '', value: null }
   async function snapshot() {
+    // Pick up nickname/avatar updates written by sync or import.
+    account = (await store.active()) || account
     if (!account) return archiveStatus([])
     const key = `${account.uid}:${store.version}`
     if (memo.key !== key) {

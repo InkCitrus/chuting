@@ -120,6 +120,32 @@ function tint(el, event) {
   el.style.setProperty('--tile-l', (.4 + ((h >>> 8) % 26) / 100).toFixed(2))
   el.style.setProperty('--tile-c', (.035 + ((h >>> 16) % 6) / 100).toFixed(3))
 }
+function avatarThumb(url) { return coverSize(url, 96) }
+function paintAvatar(el, account, { letter = '初' } = {}) {
+  if (!el) return
+  const text = account ? glyph(account.nickname || account.uid) : letter
+  if (!account?.avatarUrl) { el.replaceChildren(); el.textContent = text; return }
+  const img = new Image()
+  img.alt = ''
+  img.referrerPolicy = 'no-referrer'
+  img.decoding = 'async'
+  img.src = avatarThumb(account.avatarUrl)
+  img.onerror = () => { el.replaceChildren(); el.textContent = text }
+  el.replaceChildren(img)
+}
+function paintChipAvatar(account) {
+  const img = $('accountAvatar'), name = $('accountName')
+  if (name) name.textContent = account ? account.nickname : ''
+  if (!img) return
+  if (!account?.avatarUrl) { img.hidden = true; img.removeAttribute('src'); return }
+  img.referrerPolicy = 'no-referrer'
+  img.onerror = () => { img.hidden = true; img.removeAttribute('src') }
+  // Show immediately; onerror hides. Avoids a cached-load race where onload fires before the handler binds.
+  const src = avatarThumb(account.avatarUrl)
+  img.hidden = false
+  if (img.getAttribute('src') !== src) img.src = src
+}
+
 function glyph(name) { return ([...(name || '').trim()][0] || '♪').toLocaleUpperCase() }
 // Real album art from NetEase's CDN, sized per use; the tile underneath shows until (or unless) it loads.
 function coverImg(url, px, eager = false) {
@@ -242,7 +268,8 @@ function renderStatus() {
   const has = Boolean(state.account), online = has && state.online && !state.offline
   document.body.classList.toggle('is-syncing', running())
   const label = $('accountLabel')
-  label.textContent = has ? state.account.nickname : ''
+  paintChipAvatar(has ? state.account : null)
+  if (!$('accountName')) label.textContent = has ? state.account.nickname : ''
   label.dataset.state = !has ? 'none' : state.offline ? 'away' : online ? 'online' : 'offline'
   label.title = !has ? '' : state.offline ? '没网也能翻' : online ? '已连接网易云音乐' : '本地档案 · 扫码后接着同步'
   label.hidden = !has
@@ -777,21 +804,28 @@ function fillSong(event, follow = false) {
 function showSong(event, source) {
   if (!event) return
   const dialog = $('songDialog')
+  if (modalLayer.transition) { fillSong(event); if (!dialog.open) openModal(dialog); return }
   const from = source?.querySelector('.song-cover, .hl-sleeve, .hl-mosaic')
   // Same-document View Transition: the row's cover morphs into the dialog artwork.
   if (motion && from && document.startViewTransition && !dialog.open) {
     from.style.viewTransitionName = 'song-art'
-    const t = document.startViewTransition(() => {
+    if (history.state?.chutingModal !== dialog.id) {
+      modalLayer.focus = document.activeElement
+      modalLayer.id = dialog.id
+      history.pushState({ chutingModal: dialog.id }, '')
+    }
+    const vt = document.startViewTransition(() => {
       from.style.viewTransitionName = ''
       fillSong(event)
       $('detailCover').style.viewTransitionName = 'song-art'
       dialog.showModal()
     })
-    t.finished.finally(() => { $('detailCover').style.viewTransitionName = '' })
+    modalLayer.transition = vt
+    vt.finished.finally(() => { $('detailCover').style.viewTransitionName = ''; modalLayer.transition = null; syncSettingsExpanded() })
     return
   }
   fillSong(event)
-  if (!dialog.open) dialog.showModal()
+  if (!dialog.open) openModal(dialog)
 }
 function stepSong(delta) {
   const next = state.view[state.current + delta]
@@ -802,28 +836,48 @@ function stepSong(delta) {
 }
 
 /* ---------- 弹窗 ---------- */
-function closeDialog(dialog) {
-  if (!dialog.open) return
-  if (!motion) { dialog.close(); return }
+// History stack so browser Back closes the drawer/dialog instead of leaving the site.
+const modalLayer = { id: null, focus: null, closing: false, fromPop: false, transition: null }
+function syncSettingsExpanded() {
+  const btn = $('settingsButton')
+  if (btn) btn.setAttribute('aria-expanded', String(Boolean($('settingsDialog')?.open)))
+}
+function closeDialog(dialog, { fromPop = false } = {}) {
+  if (!dialog?.open || modalLayer.closing) return
+  modalLayer.closing = true
+  const afterClose = () => {
+    modalLayer.closing = false
+    if (modalLayer.id === dialog.id) modalLayer.id = null
+    const focus = modalLayer.focus
+    modalLayer.focus = null
+    if (!fromPop && history.state?.chutingModal === dialog.id) {
+      modalLayer.fromPop = true
+      history.back()
+    }
+    syncSettingsExpanded()
+    queueMicrotask(() => { try { focus?.focus?.({ preventScroll: true }) } catch {} })
+  }
+  if (!motion) { dialog.close(); afterClose(); return }
   // The artwork flies back into its row when that row is on screen (shared-element morph, both ways).
-  if (dialog.id === 'songDialog' && document.startViewTransition) {
+  if (dialog.id === 'songDialog' && document.startViewTransition && !modalLayer.transition) {
     const event = state.view[state.current], cover = $('detailCover')
     const target = event && document.querySelector(`.song[data-index="${event.index}"] .song-cover`)
     const r = target?.getBoundingClientRect()
     if (r && r.bottom > 0 && r.top < innerHeight && r.width) {
       cover.style.viewTransitionName = 'song-art'
-      const t = document.startViewTransition(() => { cover.style.viewTransitionName = ''; dialog.close(); target.style.viewTransitionName = 'song-art' })
-      t.finished.finally(() => { target.style.viewTransitionName = '' })
+      const vt = document.startViewTransition(() => { cover.style.viewTransitionName = ''; dialog.close(); target.style.viewTransitionName = 'song-art' })
+      modalLayer.transition = vt
+      vt.finished.finally(() => { target.style.viewTransitionName = ''; modalLayer.transition = null; afterClose() })
       return
     }
   }
   dialog.classList.add('is-closing')
-  setTimeout(() => { dialog.classList.remove('is-closing'); dialog.close() }, 200)
+  setTimeout(() => { dialog.classList.remove('is-closing'); dialog.close(); afterClose() }, 200)
 }
 for (const id of ['settingsDialog', 'songDialog', 'loginDialog']) {
   const d = $(id)
   d.addEventListener('cancel', e => { e.preventDefault(); closeDialog(d) })
-  d.addEventListener('close', () => { tick(); player?.render() })
+  d.addEventListener('close', () => { tick(); player?.render(); syncSettingsExpanded() })
   // Only a click on the backdrop closes; clicks in the dialog's own padding also target the dialog element.
   d.addEventListener('click', e => {
     if (e.target !== d) return
@@ -831,7 +885,22 @@ for (const id of ['settingsDialog', 'songDialog', 'loginDialog']) {
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeDialog(d)
   })
 }
-const openModal = dialog => { dialog.showModal(); tick() }
+const openModal = dialog => {
+  if (!dialog) return
+  if (!dialog.open) {
+    modalLayer.focus = document.activeElement
+    modalLayer.id = dialog.id
+    if (history.state?.chutingModal !== dialog.id) history.pushState({ chutingModal: dialog.id }, '')
+  }
+  dialog.showModal()
+  syncSettingsExpanded()
+  tick()
+}
+addEventListener('popstate', () => {
+  if (modalLayer.fromPop) { modalLayer.fromPop = false; return }
+  const open = document.querySelector('dialog[open]')
+  if (open) closeDialog(open, { fromPop: true })
+})
 
 /* ---------- 数据加载 ---------- */
 // The whole archive is already in memory, so search is a plain filter over pre-normalised text:
@@ -978,7 +1047,7 @@ async function autoSync() {
 /* ---------- 设置 ---------- */
 function renderSettings() {
   const has = Boolean(state.account), online = has && state.online && !state.offline, stats = state.status?.stats || {}
-  $('setAvatar').textContent = has ? glyph(state.account.nickname) : '初'
+  paintAvatar($('setAvatar'), has ? state.account : null)
   $('setName').textContent = has ? state.account.nickname : '还没有连接'
   $('setState').textContent = !has ? '扫一下，你喜欢的歌就会自己排好队' : state.offline ? '没网也能翻' : online ? '已连上网易云' : '先看着本地的，扫码再接着同步'
   $('setLogin').textContent = !has ? '扫码连接' : online ? '重新扫码' : '扫码登录'
@@ -992,6 +1061,7 @@ function renderSettings() {
     : '有备份文件的话，直接导进来。'
   // Older, wider syncs may have left non-liked songs; they stay, and can be tucked away.
   $('likedOnlyRow').hidden = !(stats.liked_available < stats.available) && !settings.likedOnly
+  syncThemeSeg()
 }
 function renderOffline(text) { $('offlineNote').textContent = text }
 async function setupOffline(backend) {
@@ -1118,6 +1188,23 @@ setupHighlights()
 rotate($('closingLine'), CLOSING_LINES, { interval: 12500, delay: 6000 })
 $('barAction').addEventListener('click', e => { const a = e.currentTarget.dataset.action; if (a === 'connect') connect(); else if (a === 'sync') startSync(); else if (a === 'pause') pauseSync() })
 $('heroAction').addEventListener('click', e => e.currentTarget.dataset.action === 'connect' ? connect() : startSync())
+
+/* ---------- 外观 ---------- */
+function syncThemeSeg() {
+  const mode = window.__chutingTheme?.read?.() || 'system'
+  for (const btn of document.querySelectorAll('#themeSeg [data-theme-opt]')) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.themeOpt === mode))
+  }
+}
+function setTheme(mode) {
+  window.__chutingTheme?.apply?.(mode)
+  syncThemeSeg()
+}
+$('themeSeg')?.addEventListener('click', e => {
+  const btn = e.target.closest('[data-theme-opt]')
+  if (btn) setTheme(btn.dataset.themeOpt)
+})
+syncThemeSeg()
 $('settingsButton').addEventListener('click', () => { renderSettings(); openModal($('settingsDialog')) })
 $('closeSettings').addEventListener('click', () => closeDialog($('settingsDialog')))
 $('closeSong').addEventListener('click', () => closeDialog($('songDialog')))
