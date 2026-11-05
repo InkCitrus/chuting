@@ -58,6 +58,10 @@ Pages CLI 不支持自定义配置路径，因此使用根目录的标准 `wrang
 
 入口 `functions/api/[[path]].js` 复用相同代理。`web/_routes.json` 只让 `/api/*` 进入 Functions，`web/_headers` 设置静态资源安全响应头。
 
+`web/_headers` 还让 `.js` / `.css` 每次重新验证（ETag 命中时只返回 304）。页面由多个 ES 模块组成，默认的 4 小时浏览器缓存可能让新旧模块混用，发布后出现难以复现的错误。
+
+内容安全策略只允许同源脚本。如果在 Pages 控制台开启了 Web Analytics，Cloudflare 自动注入的 `static.cloudflareinsights.com` 信标会被拦截，并在控制台报错。初听不收集访问数据，建议在项目的 Metrics → Web Analytics 中关闭自动注入，不要放宽 CSP。
+
 首次创建项目（已有项目跳过）：
 
 ```sh

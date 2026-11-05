@@ -114,6 +114,7 @@ def make_handler(app):
                 files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8")}
                 for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js"):
                     files["/" + name] = (name, "text/javascript; charset=utf-8")
+                files["/favicon.svg"] = ("favicon.svg", "image/svg+xml")
                 if url.path in files:
                     file, mime = files[url.path]
                     return self.send(200, (WEB / file).read_bytes(), mime)
