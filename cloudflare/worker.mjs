@@ -21,7 +21,16 @@ async function input(request) {
   try { const body = JSON.parse(Buffer.concat(chunks).toString()); if (!body || Array.isArray(body) || typeof body !== 'object') throw 0; return body }
   catch { throw new ApiError('JSON 格式错误', 400) }
 }
-export function briefSong(song) {
+// Profile fields we keep for the browser: uid, nickname, and a NetEase CDN avatar when present.
+function accountFromProfile(p) {
+  const account = { uid: String(p.userId), nickname: String(p.nickname || p.userId) }
+  const raw = typeof p.avatarUrl === 'string' ? p.avatarUrl : ''
+  const m = /^(?:https?:)?\/\/(p\d{1,2}\.music\.126\.net)\/([\w\-=./]{1,200})(?:\?.*)?$/.exec(raw)
+  if (m) account.avatarUrl = `https://${m[1]}/${m[2]}`
+  return account
+}
+
+function briefSong(song) {
   return { id: song.id, name: song.name, ar: (song.ar || []).map(a => ({ name: a.name })), al: { name: song.al?.name || '', picUrl: song.al?.picUrl || '' } }
 }
 // Audio comes straight from NetEase's CDN (m701/m801…music.126.net). URLs are signed and expire in minutes,
@@ -70,7 +79,7 @@ export async function handleApi(request, env, upstream = callNetease) {
       const { body: accountBody } = await upstream('login_status', {}, result.cookie)
       const p = accountBody.profile
       if (!p?.userId) throw new ApiError('无法读取登录账号', 401)
-      const account = { uid: String(p.userId), nickname: String(p.nickname || p.userId) }
+      const account = accountFromProfile(p)
       return json({ code: 803, account }, 200, { 'Set-Cookie': sessionCookie(request, await seal({ account, cookie: result.cookie }, env.SESSION_SECRET, 'session', 604800)) })
     }
     if (url.pathname === '/api/auth/logout') return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) })
@@ -87,7 +96,7 @@ export async function handleApi(request, env, upstream = callNetease) {
     if (body.method === 'login_status') {
       const p = result.body.profile
       if (!p?.userId || String(p.userId) !== session.account.uid) throw new ApiError('登录账号已改变，请重新连接', 401)
-      return json({ account: { uid: String(p.userId), nickname: String(p.nickname || p.userId) } })
+      return json({ account: accountFromProfile(p) })
     }
     // Song details are only used for names and album art: trim ~1–2 KB per song down to what is stored.
     if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })

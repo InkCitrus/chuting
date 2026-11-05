@@ -201,6 +201,9 @@ export class BrowserSync {
     try {
       const current = await this.request('login_status')
       if (current.account?.uid !== account.uid) throw new Error('登录账号与本地档案不一致，请重新连接')
+      if (current.account?.avatarUrl || current.account?.nickname !== account.nickname) {
+        account = await this.store.account({ ...account, ...current.account })
+      }
       const missing = (await this.store.songs(this.uid)).filter(s => s.first_listen_ms && !s.cover && !s.cover_checked_ms)
         .sort((a, b) => b.first_listen_ms - a.first_listen_ms)
       const warnings = await this.details(missing, '补全专辑封面')
@@ -262,6 +265,9 @@ export class BrowserSync {
     try {
       const current = await this.request('login_status')
       if (current.account?.uid !== account.uid) throw new Error('登录账号与本地档案不一致，请重新连接')
+      if (current.account?.avatarUrl || current.account?.nickname !== account.nickname) {
+        account = await this.store.account({ ...account, ...current.account })
+      }
       // Pass 1: liked songs (plus recent plays, rankings and playlists when enabled) are cheap to find, so their dates show up within seconds.
       warnings.push(...await this.discover({ ...options, basic_only: true }))
       await this.drain(options, warnings)

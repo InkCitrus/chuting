@@ -51,7 +51,7 @@
   :root { --d-3: .45s; --d-4: .7s; --d-5: 1s; --stagger: 45ms; --copy-ms: 16ms }
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #121110;
     --bg-2: #1b1917;
     --surface: #1e1c1a;
@@ -73,6 +73,28 @@
     --grain-o: .07;
     --glow-o: .28;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #121110;
+    --bg-2: #1b1917;
+    --surface: #1e1c1a;
+    --glass: rgb(30 28 26 / .7);
+    --glass-line: rgb(255 255 255 / .07);
+    --ink: #eee9e1;
+    --ink-2: #c4bdb2;
+    --muted: #948d83;
+    --faint: #4a4540;
+    --line: #2c2926;
+    --accent: #e3866b;
+    --accent-soft: #3a2119;
+    --on-accent: #121110;
+    --ok: #8cba95;
+    --warn: #d9ac62;
+    --danger: #e3866b;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / .4), 0 8px 20px -10px rgb(0 0 0 / .6);
+    --shadow-lg: 0 40px 120px -30px rgb(0 0 0 / .85), 0 0 0 1px rgb(255 255 255 / .05);
+    --grain-o: .07;
+    --glow-o: .28;
 }
 
 * { box-sizing: border-box }
@@ -123,11 +145,14 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 @keyframes eq { from { transform: scaleY(.25) } to { transform: scaleY(1) } }
 .brand-name { font-family: var(--serif); font-size: 19px; font-weight: 700; letter-spacing: .16em }
 .bar-actions { display: flex; gap: 10px; align-items: center; min-width: 0 }
-.account-label { color: var(--ink-2); font-size: 13px; margin-right: 4px; display: inline-flex; align-items: center; gap: 7px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.account-label { color: var(--ink-2); font-size: 13px; margin-right: 4px; display: inline-flex; align-items: center; gap: 7px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .account-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex-shrink: 0 }
 .account-label[data-state="online"]::before { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent) }
 .account-label[data-state="offline"]::before { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent) }
 .account-label[data-state="away"]::before { background: var(--muted) }
+.account-chip-avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--bg-2) }
+.account-chip-avatar[hidden] { display: none !important }
+#accountName { min-width: 0; overflow: hidden; text-overflow: ellipsis }
 
 .button { position: relative; overflow: hidden; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--ink); background: transparent; color: var(--ink); padding: 7px 17px; min-height: 36px; border-radius: 999px; font-size: 14px; font-weight: 500; line-height: 1.3; white-space: nowrap; transition: background-color .25s, color .25s, border-color .25s, transform .3s var(--spring), box-shadow .3s }
 .button:hover:not(:disabled) { background: var(--ink); color: var(--bg) }
@@ -146,9 +171,12 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 .text-button:hover { background-size: 100% 1px }
 .icon-button { height: 36px; width: 36px; border: 1px solid var(--line); border-radius: 50%; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; color: var(--ink-2); transition: border-color .2s, color .2s, transform .3s var(--spring), background-color .2s; flex-shrink: 0 }
 .icon-button:hover:not(:disabled) { border-color: var(--ink); color: var(--ink); transform: scale(1.06) }
-.gear { font-size: 18px }
-.gear svg { transition: transform .6s var(--ease) }
-.gear:hover svg { transform: rotate(60deg) }
+.gear { font-size: 17px }
+.gear svg { transition: transform .55s var(--ease) }
+.gear:hover svg { transform: rotate(45deg) }
+.gear[aria-expanded="true"] svg { transform: rotate(30deg) }
+.icon-button:active:not(:disabled) { transform: scale(.92); transition-duration: .08s }
+.button:active:not(:disabled) { transform: scale(.97); transition-duration: .08s }
 .kicker { font-size: 13px; letter-spacing: .18em; font-weight: 500; color: var(--accent); margin: 0 0 14px }
 
 main { max-width: var(--wide); margin: auto; padding: 0 40px }
@@ -324,8 +352,13 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 @media (hover: none) { .search-key { display: none } }
 .segmented { position: relative; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px) }
 .segmented button { position: relative; z-index: 1; border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--muted); transition: color .3s; flex: 1; min-width: 5.6em }
+.segmented button:active:not(:disabled) { transform: scale(.97) }
 .segmented::before { content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 999px; background: var(--ink); transition: transform .45s var(--spring) }
 .segmented:has(#orderOldest[aria-pressed="true"])::before { transform: translateX(100%) }
+.segmented.thirds { width: 100% }
+.segmented.thirds::before { width: calc((100% - 6px) / 3) }
+.segmented.thirds:has([data-theme-opt="light"][aria-pressed="true"])::before { transform: translateX(100%) }
+.segmented.thirds:has([data-theme-opt="dark"][aria-pressed="true"])::before { transform: translateX(200%) }
 .segmented button[aria-pressed="true"] { color: var(--bg) }
 
 .timeline-body { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 56px; align-items: start }
@@ -466,7 +499,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
 .sheet h2 { margin-bottom: 18px }
 .set-group h3 { font-size: 12.5px; letter-spacing: .18em; color: var(--muted); font-weight: 500; margin: 0 0 12px }
 .account-card { display: flex; align-items: center; gap: 14px; margin-bottom: 14px }
-.avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-family: var(--serif); font-weight: 900; font-size: 19px; flex-shrink: 0 }
+.avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-family: var(--serif); font-weight: 900; font-size: 19px; flex-shrink: 0; overflow: hidden }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block }
 .account-text { display: flex; flex-direction: column; min-width: 0 }
 .account-text b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .account-text span { font-size: 13px; color: var(--muted) }
@@ -696,7 +730,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hl-slide.is-active .hl-art::before { animation: breathe 3.5s var(--ease-io) 1s infinite alternate }
 }
 @keyframes breathe { from { opacity: .4; transform: scale(.9) } to { opacity: .85; transform: scale(1.08) } }
-@media (prefers-color-scheme: dark) { .hl-art::before { mix-blend-mode: screen } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .hl-art::before { mix-blend-mode: screen } }
+:root[data-theme="dark"] .hl-art::before { mix-blend-mode: screen }
 
 /* 轮播拖动：跟手，松手按速度决定翻页或弹回 */
 .hl-open { translate: var(--drag, 0) 0; rotate: calc(var(--drag, 0) / 60 * 1deg) }
@@ -747,13 +782,20 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
 ::view-transition-group(song-art) { animation-duration: var(--d-3); animation-timing-function: var(--spring-soft) }
 ::view-transition-old(song-art), ::view-transition-new(song-art) { animation-duration: var(--d-2) }
 @media (prefers-reduced-motion: no-preference) {
-  dialog[open] { animation: dialog-in var(--d-3) var(--spring-soft) }
+  dialog[open]:not(.is-closing) { animation: dialog-in var(--d-3) var(--spring-soft) }
+  dialog[open].is-closing { animation: dialog-out var(--d-2) var(--ease-in) forwards }
+  dialog[open]:not(.is-closing)::backdrop { animation: backdrop-in var(--d-3) var(--ease) }
+  dialog[open].is-closing::backdrop { animation: backdrop-out var(--d-2) var(--ease-in) forwards }
 }
+@keyframes dialog-out { to { opacity: 0; transform: translateY(10px) scale(.98) } }
+@keyframes backdrop-in { from { opacity: 0 } }
+@keyframes backdrop-out { to { opacity: 0 } }
 
 /* 性能：弹窗不再对整页做背景模糊（逐帧重绘整屏是开合卡顿的主因），改用不透明面板和色调遮罩 */
 dialog { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none }
 dialog::backdrop { background: rgb(14 11 8 / .46); backdrop-filter: none; -webkit-backdrop-filter: none }
-@media (prefers-color-scheme: dark) { dialog::backdrop { background: rgb(0 0 0 / .6) } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) dialog::backdrop { background: rgb(0 0 0 / .6) } }
+:root[data-theme="dark"] dialog::backdrop { background: rgb(0 0 0 / .6) }
 
 /* 设置：歌曲来源 */
 .set-sub { font-size: 13px; font-weight: 500; color: var(--ink-2); margin: 18px 0 4px }
@@ -806,8 +848,12 @@ dialog::backdrop { background: rgb(14 11 8 / .46); backdrop-filter: none; -webki
 .mini-player { --pos: 0; position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20; width: min(440px, calc(100% - 24px)); translate: -50% 0; display: flex; align-items: center; gap: 6px; padding: 7px 8px 7px 7px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); overflow: hidden }
 .mini-player[hidden] { display: none }
 .mini-player::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); transform-origin: 0 50%; transform: scaleX(var(--pos)); transition: transform .25s linear }
-@media (prefers-reduced-motion: no-preference) { .mini-player:not([hidden]) { animation: mini-in var(--d-4) var(--spring-soft) both } }
+@media (prefers-reduced-motion: no-preference) {
+  .mini-player:not([hidden]) { animation: mini-in var(--d-4) var(--spring-soft) both }
+  .mini-player.is-leaving { animation: mini-out var(--d-2) var(--ease-in) forwards }
+}
 @keyframes mini-in { from { opacity: 0; transform: translateY(24px) scale(.96) } }
+@keyframes mini-out { to { opacity: 0; transform: translateY(16px) scale(.96) } }
 .mini-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: var(--ink); text-align: left; padding: 0; border-radius: 12px }
 .mini-cover { width: 40px; height: 40px; border-radius: 9px; overflow: hidden; flex-shrink: 0; background: var(--bg-2) }
 .mini-cover img { width: 100%; height: 100%; object-fit: cover; display: block }

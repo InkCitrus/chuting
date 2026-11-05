@@ -358,3 +358,14 @@ test('pacing: a sustained latency rise eases off before NetEase complains', asyn
   assert.ok(sync.slowdowns >= 1)
   db.db.close()
 })
+
+test('stores avatarUrl on the account record', async () => {
+  const db = await store()
+  const saved = await db.account({ uid: '1', nickname: 'Test', avatarUrl: 'https://p1.music.126.net/a/b.jpg' })
+  assert.equal(saved.avatarUrl, 'https://p1.music.126.net/a/b.jpg')
+  assert.equal((await db.active()).avatarUrl, 'https://p1.music.126.net/a/b.jpg')
+  // A later write without avatar keeps the previous one.
+  await db.account({ uid: '1', nickname: 'Test2' })
+  assert.equal((await db.active()).nickname, 'Test2')
+  assert.equal((await db.active()).avatarUrl, 'https://p1.music.126.net/a/b.jpg')
+})
