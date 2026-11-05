@@ -95,3 +95,37 @@ test('transport uses Workers-compatible manual redirects and only fixed official
     return Response.json({ code: 200, unikey: 'fixture' })
   })
 })
+test('player: the session is forwarded, the URL comes back over https from the audio CDN only', async () => {
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'vip-session', __csrf: 'c' } }, secret, 'session', 60)
+  const ask = (rpc, query = { id: '7' }) => handleApi(req('/api/netease', { uid: '1', method: 'song_url', query }, 'chuting_session=' + token), env, rpc).then(r => r.json())
+  // Full track for a VIP account at exhigh.
+  let seen = []
+  let body = await ask(async (method, query, cookie) => { seen.push([method, query.level, cookie.MUSIC_U]); return { body: { code: 200, data: [{ id: 7, url: 'http://m701.music.126.net/2026/a.mp3?vuutv=x', br: 320000, type: 'MP3', time: 241000, fee: 1, level: 'exhigh', freeTrialInfo: null }] }, cookie: {} } })
+  assert.deepEqual(seen, [['song_url', undefined, 'vip-session']])
+  assert.deepEqual(body, { id: '7', url: 'https://m701.music.126.net/2026/a.mp3?vuutv=x', type: 'mp3', br: 320000, duration: 241000, level: 'exhigh', trial: null })
+  // No file at the high level: falls back to standard once.
+  seen = []
+  body = await ask(async (method, query) => { seen.push(query.level); return { body: { code: 200, data: [query.level === 'standard' ? { id: 7, url: 'https://m801.music.126.net/b.mp3', fee: 0, freeTrialInfo: null } : { id: 7, url: null, fee: 0 }] }, cookie: {} } })
+  assert.deepEqual(seen, [undefined, 'standard'])
+  assert.equal(body.url, 'https://m801.music.126.net/b.mp3')
+  // Account without the rights: a preview clip is flagged as a trial, not passed off as the full track.
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://m701.music.126.net/clip.mp3', fee: 1, freeTrialInfo: { start: 30, end: 60 } }] }, cookie: {} }))
+  assert.deepEqual(body.trial, { start: 30, end: 60 })
+  // Nothing playable, or a host outside the NetEase CDN: no URL, a reason the page can phrase.
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: null, fee: 4 }] }, cookie: {} }))
+  assert.deepEqual(body, { id: '7', url: null, reason: 'rights' })
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'https://evil.example/a.mp3', fee: 0 }] }, cookie: {} }))
+  assert.equal(body.url, null); assert.equal(body.reason, 'unavailable')
+})
+test('player endpoint asks NetEase for one song at a bounded quality level', () => {
+  const [path, data] = endpoint('song_url', { id: '7', level: 'lossless' })
+  assert.equal(path, '/api/song/enhance/player/url/v1')
+  assert.deepEqual(data, { ids: '[7]', level: 'exhigh', encodeType: 'flac' })
+  assert.equal(endpoint('song_url', { id: '7', level: 'standard' })[1].level, 'standard')
+  assert.throws(() => endpoint('song_url', { id: '7;drop' }))
+})
+test('CSP lets audio play only from the NetEase CDN', async () => {
+  const csp = (await handleApi(new Request(origin + '/api/runtime'), {})).headers.get('Content-Security-Policy')
+  assert.match(csp, /media-src 'self' https:\/\/\*\.music\.126\.net;/)
+})

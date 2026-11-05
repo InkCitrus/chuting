@@ -51,6 +51,11 @@ export function endpoint(method, query = {}, uid) {
       if (ids.length > 100) throw new ApiError('一次最多查询 100 首详情', 400)
       return ['/api/v3/song/detail', { c: JSON.stringify(ids.map(x => ({ id: Number(id(x)) }))) }, 'weapi']
     }
+    // Playable URL for the logged-in account (its VIP rights come with the session cookie).
+    case 'song_url': {
+      const level = ['standard', 'higher', 'exhigh'].includes(query.level) ? query.level : 'exhigh'
+      return ['/api/song/enhance/player/url/v1', { ids: JSON.stringify([Number(id(query.id))]), level, encodeType: 'flac' }]
+    }
     case 'listen_data_year_report': return ['/api/content/activity/listen/data/year/report', {}]
     case 'summary_annual': {
       const year = bounded(query.year, new Date().getUTCFullYear())
