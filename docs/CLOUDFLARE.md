@@ -1,26 +1,32 @@
 # Cloudflare 本地优先版
 
-## 数据与运行方式
+## 数据放哪儿
 
 | 内容 | 位置 |
 | --- | --- |
 | 页面、样式、同步器 | Workers Static Assets 或 Pages |
-| 候选、初听事实、差异观测、最近原始响应、查询状态 | 浏览器 IndexedDB，按网易 UID 隔离 |
-| 历史扫描检查点 | 同一个 IndexedDB，随 JSON 备份迁移 |
-| 网易登录 Cookie | 加密封装进 HttpOnly / SameSite=Strict Cookie，线上加 Secure，7 天过期 |
+| 候选、初听、观测、最近响应、查询状态 | 浏览器 IndexedDB，按网易 UID 分开 |
+| 历史扫描检查点 | 同一个 IndexedDB，跟着 JSON 备份走 |
+| 网易登录 Cookie | 加密封进 HttpOnly / SameSite=Strict Cookie，线上加 Secure，7 天过期 |
 | 会话加密密钥 | Cloudflare Secret `SESSION_SECRET` |
 
-没有云数据库、对象存储或后台任务。代理只在处理当前请求时使用 Cookie 和响应，不写入 Cloudflare 存储、不记录 Cookie 或请求体。部署包只包含 `web/` 和代理代码，不包含 `data/` 或个人备份。
+没有云数据库、对象存储或后台任务。代理处理完请求就把 Cookie 和响应丢掉，不写进 Cloudflare 存储。部署包只有 `web/` 和代理代码。
 
-需要 HTTPS、新版浏览器的 IndexedDB 和 Web Locks。清除网站数据、关闭隐私窗口或存储被回收会丢失当地档案。应用会申请持久存储，仍应定期「备份 JSON」。预览域名、生产域名与不同浏览器的数据相互独立。
+需要 HTTPS，以及带 IndexedDB 和 Web Locks 的新版浏览器。清站点数据或关掉隐私窗口，当地档案会一起走；应用会申请持久存储，换设备前记得「备份 JSON」。预览域名、生产域名、不同浏览器之间的数据互不相通。
 
 ## 本机预览
 
-Node.js 22+，执行 README 中的 `npm ci` 和 `.dev.vars` 配置，然后 `npm run dev:cloudflare`。访问 <http://127.0.0.1:8787>。不要提交 `.dev.vars`、真实 Cookie 或个人 JSON。
+Node.js 22+。按 README 装好依赖、写好 `.dev.vars`，再：
 
-## Workers Static Assets 部署
+```sh
+npm run dev:cloudflare
+```
 
-配置文件为 `wrangler.worker.jsonc`，可先把 `name` 改成自己的项目名：
+打开 <http://127.0.0.1:8787>。不要提交 `.dev.vars`、真实 Cookie 或个人备份。
+
+## Workers Static Assets
+
+配置在 `wrangler.worker.jsonc`，`name` 可以改成自己的项目名：
 
 ```sh
 npx wrangler login
@@ -29,95 +35,89 @@ npm run deploy:cloudflare
 npx wrangler secret put SESSION_SECRET --config wrangler.worker.jsonc
 ```
 
-在最后一个交互提示中输入至少 32 字符的安全随机密钥。未设置密钥时，页面仍可导入、浏览本地档案，登录和代理返回 503。设置后刷新页面，用网易云 App 扫码确认登录。
+提示里填至少 32 字符的随机密钥。没设密钥时，页面还能导入和浏览本地档案，登录和代理返回 503。设好后刷新，用网易云 App 扫一下就行。
 
-更新时重新执行 `npm run deploy:cloudflare`。不要将密钥写入 `vars` 或 Git；更换密钥会让已有登录失效，本地档案不会受影响。
+更新再跑一遍 `npm run deploy:cloudflare`。密钥别写进 `vars` 或 Git；换密钥会让已有登录失效，本地档案还在。
 
-## Pages Functions 部署
+## Pages Functions
 
 ### GitHub Actions 自动发布
 
-工作流 `.github/workflows/pages.yml` 在各分支推送和 PR 中运行测试并构建；只有 `main` 的推送或在 `main` 手动运行时才发布。生产地址为 `https://chuting.inkorange.com`。
+工作流 `.github/workflows/pages.yml`：各分支推送和 PR 都跑测试和构建；只有 `main` 的推送（或在 `main` 上手动跑）才发布。生产地址：`https://chuting.inkorange.com`。
 
-仓库 Settings → Secrets and variables → Actions 中配置：
+仓库 Settings → Secrets and variables → Actions：
 
 | Secret | 用途 |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | 仅授予目标账户的 Account → Cloudflare Pages → Edit 权限 |
+| `CLOUDFLARE_API_TOKEN` | 目标账户的 Account → Cloudflare Pages → Edit |
 | `CLOUDFLARE_ACCOUNT_ID` | Pages 项目所属 Cloudflare 账户 ID |
 
-首次发布会检查 `chuting` 项目，并在 Cloudflare 中生成随机 `SESSION_SECRET`。后续部署保留已有密钥，不会每次令用户退出登录。此运行时密钥不进入 GitHub、构建产物或日志。
+第一次发布会检查 `chuting` 项目，并在 Cloudflare 里生成随机 `SESSION_SECRET`。之后的部署沿用已有密钥，不会每次把人踢下线。这个运行时密钥不进 GitHub、构建产物或日志。
 
-`npm run build:pages` 仅从 `web/` 复制静态资源，并把 Functions 编译到 `dist/pages/_worker.js/`。CI 发布整个 `dist/pages`，不会读取或上传本机 `data/`、Cookie、个人备份或 `.dev.vars`。
+`npm run build:pages` 从 `web/` 拷静态资源，并把 Functions 编到 `dist/pages/_worker.js/`。CI 只发 `dist/pages`，碰不到本机 `data/`、Cookie、备份或 `.dev.vars`。
 
-配置好授权后，每次将改动合并到 `main` 就会自动测试、构建并发布；测试失败不发布。Cloudflare 原生 Git 自动部署可以保持关闭，避免重复构建。
+授权配好后，合并到 `main` 就会测完再发；测挂了不发。Cloudflare 原生的 Git 自动部署可以关掉，免得建两遍。
 
 ### 手动发布
 
-Pages CLI 不支持自定义配置路径，因此使用根目录的标准 `wrangler.jsonc`；Workers 的 npm 命令已显式指定另一份配置。
+Pages CLI 不认自定义配置路径，所以根目录用标准的 `wrangler.jsonc`；Workers 的 npm 命令显式指另一份。
 
-入口 `functions/api/[[path]].js` 复用相同代理。`web/_routes.json` 只让 `/api/*` 进入 Functions，`web/_headers` 设置静态资源安全响应头。
+入口 `functions/api/[[path]].js` 复用同一套代理。`web/_routes.json` 只让 `/api/*` 进 Functions；`web/_headers` 写安全响应头，并让 `.js` / `.css` 每次重新验证（ETag 命中就 304），免得新旧模块混在一起。
 
-`web/_headers` 还让 `.js` / `.css` 每次重新验证（ETag 命中时只返回 304）。页面由多个 ES 模块组成，默认的 4 小时浏览器缓存可能让新旧模块混用，发布后出现难以复现的错误。
+离线：`web/sw.js` 同源 Service Worker。页面和模块网络优先，断网才用缓存；`npm run build:pages` 把内容哈希写进缓存名，新版本激活时清掉旧的。`/sw.js` 本身不缓存，`/api/*` 从不进缓存。档案在 IndexedDB 里，断网也能翻、也能搜。
 
-离线：`web/sw.js` 是同源 Service Worker。页面和模块走「网络优先」，只有断网时才用缓存，所以发布后不会继续跑旧代码；`npm run build:pages` 会把 `dist/pages` 的内容哈希写进缓存名，旧缓存在新版本激活时删除。`_headers` 让 `/sw.js` 不缓存，浏览器每次都能检查更新。`/api/*` 从不经过缓存。档案本身在 IndexedDB 里，断网也能翻看和搜索。
-
-专辑封面直接从网易云图片 CDN（`https://*.music.126.net`）加载，带 `?param=120y120` 等尺寸参数；CSP 的 `img-src` / `connect-src` / `media-src` 只额外放行这个域名。看过的封面由 Service Worker 留存（最多 600 张，超出时先删最早的）。
+封面直接从 `https://*.music.126.net` 加载（`?param=120y120` 等）；CSP 的 `img-src` / `connect-src` / `media-src` 只额外放这个域名。看过的封面 Service Worker 最多留 600 张。
 
 ## 播放
 
-歌曲详情里的播放器通过 `/api/netease` 的 `song_url` 方法取地址：Worker 带上完整登录 Cookie（MUSIC_U 等）请求 `song/enhance/player/url/v1`，先要 exhigh，拿不到或只有试听片段时退回 standard。会员账号能直接拿到完整音源；账号确实没有版权时才标记为试听或不可播放。音频由浏览器直接从 `*.music.126.net` 加载（地址有签名、几分钟过期），不经 Worker 代理，也不进 Service Worker 缓存；离线时播放器禁用。
+歌曲详情里的播放器走 `/api/netease` 的 `song_url`：Worker 带着完整登录 Cookie 请求 `song/enhance/player/url/v1`，先要 exhigh，拿不到或只有试听就退回 standard。会员账号能拿到完整音源；真没版权才标成试听或放不了。音频由浏览器直连 `*.music.126.net`（签名地址，几分钟过期），不经 Worker，也不进 Service Worker；没网时播放器关掉。
 
-内容安全策略只允许同源脚本。如果在 Pages 控制台开启了 Web Analytics，Cloudflare 自动注入的 `static.cloudflareinsights.com` 信标会被拦截，并在控制台报错。初听不收集访问数据，建议在项目的 Metrics → Web Analytics 中关闭自动注入，不要放宽 CSP。
+CSP 只放同源脚本。Pages 开了 Web Analytics 的话，关掉它的自动注入就行，别为了信标放宽 CSP。
 
-首次创建项目（已有项目跳过）：
+首次建项目（已有的跳过）：
 
 ```sh
 npx wrangler pages project create chuting --production-branch main
 ```
 
-设置密钥并部署：
+设密钥并部署：
 
 ```sh
 npx wrangler pages secret put SESSION_SECRET --project-name chuting
 npm run deploy:pages
 ```
 
-把 `chuting` 换成自己的项目名时，同时修改 `wrangler.jsonc`、npm 命令和工作流。预览环境可在控制台设置独立 Secret。Git 集成部署的构建命令是 `npm run build:pages`，输出目录为 `dist/pages`；Functions 使用配置中的 `nodejs_compat`。
+项目名改成自己的时，连同 `wrangler.jsonc`、npm 命令和工作流一起改。预览环境可以在控制台单独设 Secret。Git 集成部署的构建命令是 `npm run build:pages`，输出 `dist/pages`；Functions 用配置里的 `nodejs_compat`。
 
-本地验证 Pages：
+本地验 Pages：
 
 ```sh
 npx wrangler pages dev web --port 8788
 ```
 
-## 迁移 SQLite 档案
+## 把本机档案迁过来
 
-旧的「导出 JSON」只包含有效初听记录，可以直接导入。要保留空结果、失败和待查询候选，生成完整迁移文件：
+旧的「导出 JSON」只有有效初听，可以直接导入。想连空结果、失败和待查的一起带走：
 
 ```sh
 python3 scripts/export_browser.py --data-dir data --output exports/chuting-browser-backup.json
 ```
 
-脚本使用只读 SQLite 快照，不修改原档案，拒绝覆盖已有文件。在新页面页底「导入档案」选择生成文件，内容只在浏览器解析，不上传到代理。原 `data/raw/` 继续作为本机证据保存；迁移文件包含全部候选状态和时间观测，不复制原始响应文件。
+脚本用只读 SQLite 快照，不改原档案，也不覆盖已有文件。在新页面设置里「导入档案」选这个文件——内容只在浏览器里解析，不上传到代理。`data/raw/` 还留在本机；迁移文件带候选状态和时间观测，不复制原始响应。
 
-浏览器「备份 JSON」包含全部候选、事实、观测、最近原始响应和检查点；CSV 只导出有效初听记录。导入先校验整个文件再写入，按账号和歌曲 ID 去重，保留已有事实和不同时间观测。单文件上限 25 MB。
+浏览器「备份 JSON」带上全部候选、事实、观测、最近响应和检查点；CSV 只导出有效初听。导入先校验整份文件再写，按账号和歌曲 ID 去重，已有事实和不同时间观测都留着。单文件上限 25 MB。
 
-## 抓取改进
+## 同步怎么跑
 
-- 8 条查询通道及重试共用一个发起间隔（AIMD）：起步约 120ms（或上次跑顺的值），每 8 次顺利返回缩短 8ms，最低 67ms（约每秒 15 次）；405/429/460/503 或 -460 风控返回会把间隔乘 3（至少 900ms）并冷却，被拒的速度不再沿用；延迟持续高于最快值 +600ms 时间隔乘 1.5。学到的间隔保存在 localStorage `chuting-pace`。
-- 「回忆坐标」接口一次只接受一个 songId，没有批量查询；前 100 首的歌名和封面先取，其余与初听查询并行。
-- 实测（本地 wrangler dev → 真实网易云，592 首喜欢的歌）：旧版约 3.4 首/秒、180 秒；新版约 13.5 首/秒、50 秒，全程没有限流。
-- 默认只同步「我喜欢的音乐」，从最近喜欢的开始往回查。最近播放与听歌排行、自建歌单、历史月榜和年度报告都在设置里单独打开。只有 ID 的歌曲批量补充名字。
-- 每首歌的初听时间直接来自 `music_first_listen_info`，其他来源只用来发现更多歌曲，不参与定日期。
-- 历史扫描自动从听歌足迹最早年份开始，或手动指定 2017 年以来的起点。逐月扫描到本月，再查年度报告。
-- 月榜、报告中的明确 `songId` 只作为候选；`firstDate`、月榜日期和次数都不能生成初听事实。
-- 成功扫描后保存检查点：当月 1 天内、历史月份和年度报告 30 天内跳过。失败来源不会标记成功，下次继续补查，并在任务状态中提示。
-- 每首使用独立 IndexedDB 事务提交。首次采集到的时间作为显示版本，其他时间保留为差异观测；空结果不能删除已知事实。
-- 网络、408 和临时 5xx 最多重试 2 次，等待 2 秒、4 秒。301/401/403/429/460 立即停止；连续 3 首失败也停止。等待已发出的请求落盘后再保存最终状态。
-- 已有有效事实跳过。空结果满 30 天自动补查，也可显式提前补查。Web Locks 防止同账号多个标签页同时同步；关闭后重新打开会标记上次中断，可手动继续。
+- 默认只翻「我喜欢的音乐」，从最近喜欢的开始往回。最近播放、排行、自建歌单、历史月榜和年度报告在设置里单独开。
+- 初听时间来自 `music_first_listen_info`（一次一个 songId）；其他来源只用来发现更多歌。前 100 首的歌名和封面先取，其余和初听查询并行。
+- 8 条通道共用一个发起间隔：约 120ms 起步（或上次跑顺的值），顺畅就逐步收到 67ms（约每秒 15 次）；限流或风控就把间隔乘 3 并冷却，学到的速度记在 `localStorage` 的 `chuting-pace`。
+- 历史扫描从听歌足迹最早年份起，或手动指定 2017 年以来的起点；逐月扫到本月，再查年度报告。月榜、报告里的 `songId` 只当候选。
+- 扫过的月份和年报会记检查点：当月 1 天内、更早的 30 天内跳过；失败的下次再补。
+- 每首歌单独落盘。第一次拿到的时间用来显示，其他时间留作观测；空结果不会抹掉已知事实。
+- 网络、408、临时 5xx 最多重试 2 次。301/401/403/429/460 立刻停；连续 3 首失败也停。Web Locks 保证同账号不会两个标签页一起同步；关掉再开会标成中断，可以接着来。
 
-月榜只有 Top20，年度报告也只包含部分歌曲。扩大候选范围可以提高覆盖，无法证明完整还原了所有历史播放。本机 Python 版保留串行，但也增加本周排行、临时错误重试和空结果自动补查。
+本机 Python 版一次一首，同样有本周排行、临时错误重试和空结果自动补查。
 
 ## 验证
 
@@ -127,8 +127,8 @@ npm run check:cloudflare
 npx wrangler pages functions build --outdir dist/pages-functions --compatibility-date 2026-11-03 --compatibility-flag nodejs_compat
 ```
 
-测试覆盖加密与固定上游版本的一致性、会话校验、跨站拒绝、UID 绑定、并发写入、去重和冲突、导入原子性、限流、暂停恢复和历史检查点。真实网易接口需在本地 Workers 运行时和最终部署域名分别验证，本地可用不代表 Cloudflare 出口不会被上游限制。
+测的是加密、会话、跨站拒绝、UID 绑定、并发写入、去重和冲突、导入、限流、暂停恢复和历史检查点。真实网易接口最好在本地 Workers 和最终域名各验一遍。
 
-这是无需云数据库的多用户自助工具。页面关闭后不继续后台抓取，不自动跨设备同步。
+关掉页面就停；档案不自动跨设备。
 
 参考：[Workers 静态资源](https://developers.cloudflare.com/workers/static-assets/)、[Pages 配置](https://developers.cloudflare.com/pages/functions/wrangler-configuration/)、[Pages 命令](https://developers.cloudflare.com/workers/wrangler/commands/pages/)、[Workers crypto](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/)。
