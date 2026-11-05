@@ -24,18 +24,18 @@ export function insights(events) {
   const counted = events.some(plays)
 
   const first = events[0]
-  song('earliest', '最早的一首', first, `${dayLabel(first.date, true)} ${first.time} · 档案从这里开始`)
+  song('earliest', '最早的一首', first, `${dayLabel(first.date, true)} ${first.time} · 一切从这里开始`)
 
   if (counted) {
     const top = best(events, plays)
-    if (top) song('most-played', '听得最多的歌', top, `累计播放 ${n(top.play_count)} 次 · ${dayLabel(top.date, true)}初听`)
+    if (top) song('most-played', '听得最多的歌', top, `听了 ${n(top.play_count)} 遍 · ${dayLabel(top.date, true)}初遇`)
     const afternoon = best(events.filter(e => hour(e) >= 12 && hour(e) < 18), plays)
-    if (afternoon) song('afternoon', '午后遇见，听得最多', afternoon, `下午 ${afternoon.time} 第一次响起 · 之后累计播放 ${n(afternoon.play_count)} 次`)
+    if (afternoon) song('afternoon', '午后遇见，后来最常听', afternoon, `下午 ${afternoon.time} 初遇 · 后来听了 ${n(afternoon.play_count)} 遍`)
     const night = best(events.filter(e => hour(e) < 5), plays)
-    if (night) song('late-night', '深夜遇见，听得最多', night, `凌晨 ${night.time} 第一次响起 · 之后累计播放 ${n(night.play_count)} 次`)
+    if (night) song('late-night', '深夜遇见，后来最常听', night, `凌晨 ${night.time} 初遇 · 后来听了 ${n(night.play_count)} 遍`)
   } else {
     const night = best(events.filter(e => hour(e) < 5), e => 1 + (hour(e) * 60 + Number(e.time.slice(3))) / 1e4)
-    if (night) song('late-night', '深夜遇见的一首', night, `凌晨 ${night.time} 第一次响起`)
+    if (night) song('late-night', '深夜遇见的一首', night, `凌晨 ${night.time}，第一次响起`)
   }
 
   const peak = best(events.filter(e => e.peak_count >= 3), e => e.peak_count)

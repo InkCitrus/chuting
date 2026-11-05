@@ -3,8 +3,9 @@ import assert from 'node:assert/strict'
 import 'fake-indexeddb/auto'
 import { BrowserStore } from '../web/browser-store.js'
 import { BrowserSync } from '../web/browser-sync.js'
-import { parseFirst, needsQuery, reportSongs, monthEnds, csv, coverUrl, metadata, eventFromSong, DAY } from '../web/archive-core.js'
+import { parseFirst, needsQuery, reportSongs, monthEnds, csv, coverUrl, metadata, eventFromSong, inScope, archiveStatus, DAY } from '../web/archive-core.js'
 import { insights } from '../web/insights.js'
+import { taglines, timelineLedes, endTitles, WELCOME_LINES, CLOSING_LINES } from '../web/copy.js'
 const account = { uid: '1', nickname: 'Test' }, stamp = 1709991108310
 const response = (id, ms = stamp) => ({ code: 200, data: { songInfoDto: { songId: id, songName: "and I'm home", singer: 'Test' }, musicFirstListenDto: { listenTime: ms }, musicTotalPlayDto: { playCount: 162 } } })
 async function store() { return new BrowserStore('test-' + crypto.randomUUID()).open() }
@@ -53,7 +54,7 @@ test('empty TTL, explicit retry, report candidates, month boundaries and CSV saf
 })
 test('bounded parallel collection retries transient errors and resumes without duplicate queries', async () => {
   const db = await store(); await db.account(account)
-  await db.candidates('1', [10, 11, 12, 13].map(id => ({ id, name: 'song' })), 'test')
+  await db.candidates('1', [10, 11, 12, 13].map(id => ({ id, name: 'song' })), '喜欢的歌曲')
   let inFlight = 0, max = 0, transient = true, requests = []
   const rpc = async (method, query) => {
     if (method === 'login_status') return { account }
@@ -87,7 +88,7 @@ test('bounded parallel collection retries transient errors and resumes without d
 })
 test('rate limiting slows down and retries, then stops all lanes and records final state', async () => {
   const db = await store(); await db.account(account)
-  await db.candidates('1', [10, 11, 12, 13].map(id => ({ id, name: 'song' })), 'test')
+  await db.candidates('1', [10, 11, 12, 13].map(id => ({ id, name: 'song' })), '喜欢的歌曲')
   let count = 0, waited = []
   const sync = new BrowserSync(db, async (method, query) => {
     if (method === 'login_status') return { account }
@@ -112,7 +113,7 @@ test('rate limiting slows down and retries, then stops all lanes and records fin
 })
 test('a single rate-limit answer only slows the run down; it still finishes', async () => {
   const db = await store(); await db.account(account)
-  await db.candidates('1', [10, 11, 12].map(id => ({ id, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), 'test')
+  await db.candidates('1', [10, 11, 12].map(id => ({ id, name: 'song', cover: 'http://p1.music.126.net/x/1.jpg' })), '喜欢的歌曲')
   let limited = false
   const sync = new BrowserSync(db, async (method, query) => {
     if (method === 'login_status') return { account }
@@ -204,7 +205,7 @@ test('history scans persist checkpoints and only add candidates, never report da
 })
 test('pausing leaves work pending and a fresh collector can resume it', async () => {
   const db = await store(); await db.account(account)
-  await db.candidates('1', [10, 11, 12].map(id => ({ id, name: 'song' })), 'test')
+  await db.candidates('1', [10, 11, 12].map(id => ({ id, name: 'song' })), '喜欢的歌曲')
   let sync, count = 0
   const rpc = async (method, query) => {
     if (method === 'login_status') return { account }
@@ -236,9 +237,57 @@ test('recent songs are dated before the long history scan runs', async () => {
   }
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (_n, _o, work) => work({}) } } })
   const sync = new BrowserSync(db, rpc, { interval: 0, wait: async () => {} })
-  await sync.start(account, { concurrency: 2, limit: 0, history: true, history_from: new Date().getFullYear() }); await sync.task
+  await sync.start(account, { concurrency: 2, limit: 0, recent: true, history: true, history_from: new Date().getFullYear() }); await sync.task
   assert.ok(order.indexOf('q20') < order.indexOf('listen_data_song_play_rank'))
   assert.ok(order.indexOf('q21') > order.indexOf('listen_data_song_play_rank'))
   assert.equal(sync.run.status, 'completed'); assert.equal(sync.run.queried, 2); assert.equal(sync.run.total, 2)
+  db.db.close()
+})
+test('rotating copy: stable first line, data lines only when the archive supports them', () => {
+  assert.deepEqual(taglines([]), WELCOME_LINES)
+  const ev = (date, time, extra = {}) => ({ date, time, name: 's' + date, ...extra })
+  const plain = [ev('2025-01-02', '13:00'), ev('2025-01-02', '14:00'), ev('2025-03-05', '15:00')]
+  const lines = taglines(plain)
+  assert.equal(lines[0], WELCOME_LINES[0])
+  assert.ok(!lines.some(l => l.includes('遍')), 'no play-count line without play counts')
+  assert.ok(!lines.some(l => l.includes('最常在')), 'no time-of-day line from three songs')
+  assert.ok(lines.includes('这条时间线，已经走了 2 个月。'))
+  const counted = [...plain, ev('2025-03-06', '15:30', { play_count: 41 }), ev('2025-03-07', '16:00'), ev('2025-03-08', '12:10')]
+  const more = taglines(counted)
+  assert.ok(more.includes('《s2025-03-06》听了 41 遍，第一次是在 2025 年 3 月 6 日。'))
+  assert.ok(more.includes('你最常在午后遇见新歌。'))
+  const ledes = timelineLedes(plain, 'newest')
+  assert.equal(ledes[0], '每一行，都是一首歌第一次响起的时刻。')
+  assert.ok(ledes.includes('最热闹的一天是 2025 年 1 月 2 日，一天遇见了 2 首。'))
+  assert.notDeepEqual(endTitles('newest'), endTitles('oldest'))
+  assert.ok(CLOSING_LINES.every(l => !/记录|不是/.test(l)), 'no disclaimers in the closing lines')
+})
+test('by default only liked songs are requested and dated, newest like first; other songs are kept', async () => {
+  const db = await store(); await db.account(account)
+  await db.candidates('1', [{ id: '50', name: 'old playlist song' }], '我的歌单') // from an earlier, wider sync
+  const calls = [], dated = []
+  const rpc = async (method, query) => {
+    calls.push(method)
+    if (method === 'login_status') return { account }
+    if (method === 'likelist') return { ids: [62, 61, 60] } // NetEase lists the newest like first
+    if (method === 'song_detail') return { songs: query.ids.split(',').map(id => ({ id: Number(id), name: 'n' + id, ar: [{ name: 'a' }], al: { name: 'b' } })) }
+    if (method === 'music_first_listen_info') { dated.push(query.id); return response(query.id) }
+    throw new Error('unexpected ' + method)
+  }
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: async (_n, _o, work) => work({}) } } })
+  const sync = new BrowserSync(db, rpc, { interval: 0, wait: async () => {} })
+  await sync.start(account, { concurrency: 1, limit: 0 }); await sync.task
+  assert.deepEqual(dated, ['62', '61', '60'])
+  for (const m of ['record_recent_song', 'user_record', 'user_playlist', 'listen_data_year_report']) assert.ok(!calls.includes(m), m + ' is opt-in')
+  const songs = await db.songs('1'), kept = songs.find(s => s.id === '50')
+  assert.equal(kept.status, 'pending', 'non-liked songs are kept, not deleted and not queried')
+  const stats = archiveStatus(songs).stats
+  assert.equal(stats.liked, 3); assert.equal(stats.pending_liked, 0); assert.equal(stats.pending, 1)
+  assert.equal(inScope(kept, {}), false); assert.equal(inScope(kept, { playlists: true }), true)
+  assert.equal(inScope({ sources: ['历史月榜 2024-01'] }, { history: true }), true)
+  // Opting in brings the other sources back.
+  calls.length = 0
+  await sync.start(account, { concurrency: 1, limit: 0, recent: true }); await sync.task
+  assert.ok(calls.includes('record_recent_song') && calls.includes('user_record'))
   db.db.close()
 })

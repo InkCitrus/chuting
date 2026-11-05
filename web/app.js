@@ -1,6 +1,9 @@
 'use strict'
 import { createBackend, remote } from './backend.js'
 import { insights } from './insights.js'
+import { createPlayer } from './player.js'
+import { rotate, clearCopy } from './rotator.js'
+import { taglines, timelineLedes, endTitles, WELCOME_LINES, SYNCING_LINES, LOADING_LINES, INTRO_TITLES, CLOSING_LINES, SYNCING_EMPTY } from './copy.js'
 import { coverSize } from './archive-core.js'
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
@@ -17,7 +20,14 @@ let motion = !reduced.matches && 'IntersectionObserver' in window
 const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches
 const stored = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)) } catch {} }
-const settings = { auto: true, history: true, playlists: true, ...stored('chuting-settings', {}) }
+// v3: only liked songs are synced by default; older saved choices keep just the auto-sync switch.
+const savedSettings = stored('chuting-settings', {})
+const settings = { auto: true, recent: false, playlists: false, history: false, likedOnly: false,
+  ...(savedSettings.v === 3 ? savedSettings : { auto: savedSettings.auto ?? true }), v: 3 }
+const LIKED = '喜欢的歌曲'
+const wideScope = () => settings.recent || settings.playlists || settings.history
+// Songs waiting in the current scope (liked songs only, unless more sources are switched on).
+const pendingNow = stats => (wideScope() || stats.pending_liked == null ? stats.pending : stats.pending_liked) || 0
 let storedOrder = 'newest'
 try { storedOrder = localStorage.getItem('chuting-order') === 'oldest' ? 'oldest' : 'newest' } catch {}
 
@@ -26,6 +36,7 @@ const state = {
   all: [], results: null, query: '', terms: [], order: storedOrder, request: 0, autoTried: false,
   view: [], chapters: [], rendered: 0, active: '', counted: false, current: -1,
 }
+let player = null
 let toastTimer, searchTimer, revealObserver, chapterObserver, sentinelObserver, pollTimer
 
 /* ---------- 小工具 ---------- */
@@ -186,16 +197,16 @@ function monthStory(events, search) {
 }
 
 /* ---------- 顶部与开场 ---------- */
-function countUp(root) {
+function countUp(root, from = []) {
   if (!motion) return
-  for (const b of root.querySelectorAll('.num')) {
-    const target = Number(b.textContent.replace(/[^\d]/g, ''))
-    if (!target || target < 3) continue
-    const start = performance.now(), duration = Math.min(1400, 600 + target * 4)
+  for (const [k, b] of [...root.querySelectorAll('.num')].entries()) {
+    const target = Number(b.textContent.replace(/[^\d]/g, '')), origin = from[k] ?? 0
+    if (!target || target < 3 || origin === target) continue
+    const start = performance.now(), duration = from.length ? 700 : Math.min(1400, 600 + target * 4)
     b.classList.add('counting')
     const tick = now => {
       const t = Math.min(1, (now - start) / duration), eased = 1 - (1 - t) ** 4
-      b.textContent = n(Math.round(target * eased))
+      b.textContent = n(Math.round(origin + (target - origin) * eased))
       if (t < 1) requestAnimationFrame(tick); else b.classList.remove('counting')
     }
     requestAnimationFrame(tick)
@@ -208,7 +219,7 @@ function renderStatus() {
   const label = $('accountLabel')
   label.textContent = has ? state.account.nickname : ''
   label.dataset.state = !has ? 'none' : state.offline ? 'away' : online ? 'online' : 'offline'
-  label.title = !has ? '' : state.offline ? '离线中，档案照常可看' : online ? '已连接网易云音乐' : '正在浏览本地档案，同步前需要扫码登录'
+  label.title = !has ? '' : state.offline ? '没网也能翻' : online ? '已连接网易云音乐' : '本地档案 · 扫码后接着同步'
   label.hidden = !has
 
   const bar = $('barAction')
@@ -222,43 +233,52 @@ function renderStatus() {
   else if (state.local && !online) { bar.textContent = '扫码登录'; bar.dataset.action = 'connect'; bar.className = 'button primary' }
   else { bar.textContent = '同步'; bar.dataset.action = 'sync'; bar.className = 'button primary' }
 
-  const story = $('heroStory'), sub = $('heroSub'), action = $('heroAction')
+  const story = $('heroStory'), sub = $('heroSub'), action = $('heroAction'), tagline = $('heroTagline')
   story.classList.toggle('is-loading', state.loading)
   $('heroKicker').textContent = has ? `网易云音乐 · ${state.account.nickname} 的初听档案` : '网易云音乐 · 初听档案'
   action.hidden = true
   $('scrollCue').hidden = true
   $('intro').hidden = state.loading || has || Boolean(state.error)
+  if (!$('intro').hidden) rotate($('introTitle'), INTRO_TITLES, { interval: 9400, delay: 1800 })
   $('timelineSection').hidden = !state.loading && !has && !state.error
   if (state.loading) {
     story.replaceChildren(node('span', 'skeleton-line'), node('span', 'skeleton-line short'))
-    sub.textContent = '正在翻开你的初听…'
+    rotate(sub, LOADING_LINES, { interval: 2400, delay: -1200 })
+    rotate(tagline, WELCOME_LINES, { interval: 8200, delay: 3200 })
   } else if (!has) {
-    sentence(story, ['每首歌，都有第一次响起的那天。', ['扫一次码', 'mark'], '，初听会把它们一首首找回来，排成只属于你的时间线。'])
-    sub.textContent = state.local ? '连上后自动同步全部歌曲。档案只保存在这个浏览器里，不上传到任何服务器。' : '数据只保存在这台电脑上，登录只在同步时用到。'
+    sentence(story, ['扫一下，把你', ['喜欢的歌', 'mark'], '一首首送回第一次听见它的那天。'])
+    rotate(tagline, WELCOME_LINES, { interval: 8200, delay: 3200 })
+    clearCopy(sub, '先从你喜欢的歌开始，想多翻点，设置里再开。')
     action.textContent = '连接网易云音乐'; action.hidden = false; action.dataset.action = 'connect'
   } else if (!stats.available) {
     if (running()) {
-      sentence(story, ['正在把你的歌一首首找回来。', ['第一批初听', 'mark'], '很快就会出现在下面。'])
-      sub.textContent = stats.discovered ? `已经找到 ${n(stats.discovered)} 首歌，正在逐首查询初听时间。` : '先从最近播放、排行、喜欢的歌和歌单里找歌。'
+      sentence(story, ['正在翻你', ['喜欢的歌', 'mark'], '，第一批马上就到。'])
+      rotate(tagline, SYNCING_LINES, { interval: 7600, delay: 2600 })
+      clearCopy(sub, stats.discovered ? `找到 ${n(stats.discovered)} 首，正在一首首问网易云。` : '先翻翻你喜欢的歌…')
     } else {
-      sentence(story, ['故事还没开始。', ['同步一下', 'mark'], '，看看你和每首歌是哪天相遇的。'])
-      sub.textContent = stats.discovered ? `已经找到 ${n(stats.discovered)} 首歌，其中 ${n(stats.pending)} 首还在排队。` : '会从最近播放、听歌排行、喜欢的歌和你的歌单里找歌。'
+      sentence(story, ['还空着呢。', ['同步一下', 'mark'], '，看看你们是哪天认识的。'])
+      rotate(tagline, WELCOME_LINES, { interval: 8200, delay: 3200 })
+      clearCopy(sub, stats.discovered ? `找到 ${n(stats.discovered)} 首，还有 ${n(pendingNow(stats))} 首在排队。` : '先从「我喜欢的音乐」翻起。')
       if (!state.offline) { action.textContent = online || !state.local ? '开始同步' : '扫码登录，开始同步'; action.hidden = false; action.dataset.action = online || !state.local ? 'sync' : 'connect' }
     }
   } else {
-    const [ey, em, ed] = ymd(calendar.earliest), [ly, lm, ld] = ymd(calendar.latest)
+    // Numbers follow what is shown (the liked-only filter included).
+    const shown = state.all.length ? { earliest: state.all[0].date, latest: state.all.at(-1).date, days: new Set(state.all.map(e => e.date)).size, available: state.all.length } : { ...calendar, available: stats.available }
+    const [ey, em, ed] = ymd(shown.earliest), [ly, lm, ld] = ymd(shown.latest)
     const from = `${ey} 年 ${em} 月 ${ed} 日`, to = ey === ly ? `${lm} 月 ${ld} 日` : `${ly} 年 ${lm} 月 ${ld} 日`
     const first = state.all[0]
-    const pieces = ['从 ', [from, 'mark'], ' 到 ', [to, 'mark'], '，你在 ', [n(calendar.days)], ' 个日子里，第一次听见了 ', [n(stats.available)], ' 首歌。']
+    const pieces = ['从 ', [from, 'mark'], ' 到 ', [to, 'mark'], '，你在 ', [n(shown.days)], ' 个日子里，第一次听见了 ', [n(shown.available)], ' 首歌。']
     if (first) pieces.push('一切从', [`《${first.name}》`, 'mark wrap'], '开始。')
-    const sig = `${stats.available}-${calendar.days}-${first?.song_id}`
+    rotate(tagline, taglines(state.all), { interval: 8200, delay: 1200 })
+    const sig = `${shown.available}-${shown.days}-${first?.song_id}`
     if (!story.querySelector('.num') || story.dataset.sig !== sig) {
+      const before = [...story.querySelectorAll('.num')].map(b => Number(b.textContent.replace(/[^\d]/g, '')))
       sentence(story, pieces)
       story.dataset.sig = sig
       if (!state.counted && first) { state.counted = true; countUp(story) }
+      else if (before.length) countUp(story, before) // numbers glide from the old value while a sync adds songs
     }
-    sub.textContent = [`已查询 ${n(stats.queried)} / ${n(stats.discovered)} 首`, stats.pending ? `还有 ${n(stats.pending)} 首在排队` : '找到的歌都查完了',
-      stats.empty ? `${n(stats.empty)} 首暂无记录` : ''].filter(Boolean).join(' · ')
+    clearCopy(sub, pendingNow(stats) ? `还有 ${n(pendingNow(stats))} 首在排队` : wideScope() ? '都查完了' : '你喜欢的歌都查完了')
     $('scrollCue').hidden = false
     $('scrollCueText').textContent = state.order === 'newest' ? '最近的一首' : '最早的一首'
   }
@@ -266,14 +286,15 @@ function renderStatus() {
   const line = $('syncLine')
   line.hidden = !has || (!run && !stats.discovered)
   line.dataset.status = run ? run.status : 'idle'
-  $('syncMessage').textContent = state.offline ? '离线中 · 档案和搜索照常可用，联网后会继续同步'
+  $('syncMessage').textContent = state.offline ? '没网了，先翻翻看'
     : run ? run.phase + (run.error && !running() ? ` · ${run.error}` : '')
-    : state.local && !online ? '这份档案来自备份 · 扫码登录后会继续同步' : '还没有同步过'
+    : state.local && !online ? '从备份里来的 · 扫码接着同步' : '还没有同步过'
   $('pauseButton').hidden = !running()
   const total = running() && run.total ? run.total : stats.discovered || 1
   $('coverageProgress').max = total
   $('coverageProgress').value = running() && run.total ? run.queried || 0 : stats.queried || 0
   renderSettings()
+  player?.setOffline(state.offline ? 'offline' : has && !online ? 'login' : null)
 }
 
 /* ---------- 高光轮播 ---------- */
@@ -284,6 +305,11 @@ function renderHighlights() {
   const box = $('highlights')
   const items = state.loading || !state.all.length ? [] : insights(state.all)
   const sig = items.map(i => `${i.id}:${i.event?.song_id || i.title}:${i.cover || i.covers?.length || ''}`).join('|')
+  if (box.hidden && items.length && motion && performance.now() < 8000 && !hl.introduced) {
+    hl.introduced = true // the record drops in once, as part of the page-load choreography
+    box.classList.add('is-intro'); hold('intro', true)
+    setTimeout(() => { box.classList.remove('is-intro'); hold('intro', false) }, 2600)
+  }
   box.hidden = !items.length
   document.querySelector('.hero').classList.toggle('has-highlights', items.length > 0)
   if (sig === hl.sig) return
@@ -349,6 +375,7 @@ function setSlide(i, options = {}) {
   }
   if (options.announce) $('hlLive').textContent = `${hl.items[i].kicker}：${hl.items[i].title}`
   applyTone(document.querySelector('.hero'), slides[i].querySelector('.hl-sleeve .cover-img, .hl-cell .cover-img'))
+  if (!options.instant) document.dispatchEvent(new Event('chuting:slide'))
   restartTimer()
 }
 function restartTimer() {
@@ -409,14 +436,39 @@ function setupHighlights() {
     if (e.key === 'ArrowLeft') { e.preventDefault(); setSlide(hl.index - 1, { dir: -1, announce: true }) }
     if (e.key === 'ArrowRight') { e.preventDefault(); setSlide(hl.index + 1, { dir: 1, announce: true }) }
   })
+  // Drag follows the pointer (with resistance); on release the distance or the flick speed decides.
   let swipe = null, swiped = false
-  stage.addEventListener('pointerdown', e => { swipe = { x: e.clientX, y: e.clientY }; swiped = false })
-  stage.addEventListener('pointerup', e => {
+  const release = () => { stage.classList.remove('is-dragging'); stage.style.removeProperty('--drag') }
+  stage.addEventListener('pointerdown', e => {
+    if (e.button || hl.items.length < 2) return
+    swipe = { x: e.clientX, y: e.clientY, t: e.timeStamp, lastX: e.clientX, lastT: e.timeStamp, v: 0, axis: '' }; swiped = false
+  })
+  stage.addEventListener('pointermove', e => {
     if (!swipe) return
     const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y
-    swipe = null
-    if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.4) { swiped = true; setSlide(hl.index + (dx < 0 ? 1 : -1), { dir: dx < 0 ? 1 : -1, announce: true }) }
+    if (!swipe.axis && Math.hypot(dx, dy) > 8) {
+      swipe.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+      if (swipe.axis === 'x') { stage.setPointerCapture?.(e.pointerId); stage.classList.add('is-dragging'); hold('drag', true) }
+    }
+    if (swipe.axis !== 'x') return
+    const dt = Math.max(1, e.timeStamp - swipe.lastT)
+    swipe.v = .7 * ((e.clientX - swipe.lastX) / dt) + .3 * swipe.v
+    swipe.lastX = e.clientX; swipe.lastT = e.timeStamp
+    if (motion) stage.style.setProperty('--drag', `${(dx / (1 + Math.abs(dx) / 260)).toFixed(1)}px`)
   })
+  const end = e => {
+    if (!swipe) return
+    const dx = e.clientX - swipe.x, horizontal = swipe.axis === 'x', v = swipe.v
+    swipe = null
+    if (horizontal) hold('drag', false)
+    release()
+    if (horizontal && (Math.abs(dx) > 60 || (Math.abs(v) > .45 && Math.abs(dx) > 16))) {
+      const dir = (Math.abs(v) > .45 ? v : dx) < 0 ? 1 : -1
+      swiped = true; setSlide(hl.index + dir, { dir, announce: true })
+    } else if (horizontal && Math.abs(dx) > 8) swiped = true
+  }
+  stage.addEventListener('pointerup', end)
+  stage.addEventListener('pointercancel', () => { swipe = null; hold('drag', false); release() })
   stage.addEventListener('click', e => {
     const open = e.target.closest('.hl-open')
     if (!open) return
@@ -468,6 +520,9 @@ function renderTimeline(options = {}) {
   $('timelineTitle').textContent = search ? `搜索「${search}」` : '时间线'
   $('timelineMeta').textContent = state.loading ? '' : search ? `找到 ${n(state.view.length)} 首` : state.view.length ? `${n(state.chapters.length)} 个月 · ${n(state.view.length)} 首初听` : ''
   $('timelineTools').hidden = !state.loading && !search && !state.all.length
+  const lede = $('timelineLede')
+  lede.hidden = state.loading || Boolean(search) || !state.all.length
+  if (!lede.hidden) rotate(lede, timelineLedes(state.all, state.order), { interval: 11000, delay: 5200 })
   for (const [id, order] of [['orderNewest', 'newest'], ['orderOldest', 'oldest']]) $(id).setAttribute('aria-pressed', String(state.order === order))
   chapterObserver?.disconnect()
   const timeline = $('timeline')
@@ -481,10 +536,10 @@ function renderTimeline(options = {}) {
   }
   if (state.error) return timeline.append(emptyBlock('时间线没能加载', state.error, '重新加载', () => loadEvents(true)))
   if (!state.view.length) {
-    if (search) return timeline.append(emptyBlock('没有找到相关歌曲', '换个歌名或歌手试试，也可能它还没被同步进来。', '清空搜索', clearSearch))
-    if (state.account && running()) return timeline.append(emptyBlock('正在同步', '查到第一首有初听记录的歌，它就会出现在这里。'))
-    if (state.account) return timeline.append(emptyBlock('这一页还空着', '同步之后，每一首初听都会按月份和日子排在这里。', '开始同步', () => startSync()))
-    return timeline.append(emptyBlock('从连接账号开始', '连接网易云音乐后，初听会按时间一首首排在这里。', '连接网易云音乐', connect))
+    if (search) return timeline.append(emptyBlock('没找到这首', '换个词试试？', '清空搜索', clearSearch))
+    if (state.account && running()) return timeline.append(emptyBlock('正在同步', SYNCING_EMPTY))
+    if (state.account) return timeline.append(emptyBlock('这里还空着', '同步一下，这里就热闹了。', '开始同步', () => startSync()))
+    return timeline.append(emptyBlock('从扫码开始', '扫一下，这里就开始写了。', '连接网易云音乐', connect))
   }
   renderMore(undefined, { instant: keep, until: previous })
   if (anchor) {
@@ -568,14 +623,18 @@ function renderEnd() {
   const search = state.query.trim()
   if (search) { end.append(node('p', 'end-copy', '搜索结果就这些了。')); return end }
   const stats = state.status?.stats || {}
-  end.append(node('span', 'end-mark'), node('p', 'end-title', state.order === 'newest' ? '再往前，是还没被找回的日子。' : '故事暂时写到这里。'))
-  end.append(node('p', 'end-copy', running() ? '同步还在进行，新查到的初听会自动续写在这里。' : stats.pending ? `还有 ${n(stats.pending)} 首歌在排队，更多初听也许就藏在里面。` : '之后遇见的新歌，同步一下就会续写在这里。'))
-  if (stats.pending && !running() && !state.offline) { const b = node('button', 'button ghost', '继续同步'); b.type = 'button'; b.addEventListener('click', () => startSync()); end.append(b) }
+  const title = node('p', 'end-title')
+  end.append(node('span', 'end-mark'), title)
+  rotate(title, endTitles(state.order), { interval: 9800, delay: 2400 })
+  end.append(node('p', 'end-copy', running() ? '还在同步，新的会自己接上。' : pendingNow(stats) ? `还有 ${n(pendingNow(stats))} 首在排队。` : '下一首，等你去遇见。'))
+  if (pendingNow(stats) && !running() && !state.offline) { const b = node('button', 'button ghost', '接着同步'); b.type = 'button'; b.addEventListener('click', () => startSync()); end.append(b) }
   return end
 }
 function emptyBlock(title, text, label, action) {
   const box = node('div', 'empty-block')
-  box.append(node('span', 'end-mark'), node('h3', '', title), node('p', '', text))
+  const copy = node('p')
+  box.append(node('span', 'end-mark'), node('h3', '', title), copy)
+  if (Array.isArray(text)) rotate(copy, text, { interval: 6800, delay: 1500 }); else copy.textContent = text
   if (!label) return box
   const button = node('button', 'button ghost', label)
   button.type = 'button'
@@ -657,8 +716,10 @@ function observe(instant = false) {
 }
 
 /* ---------- 歌曲详情 ---------- */
-function fillSong(event) {
+function fillSong(event, follow = false) {
   state.current = event.index
+  $('player').hidden = !(state.local && state.account)
+  player?.show(event, { follow })
   const cover = $('detailCover'), label = $('detailLabel')
   tint(cover, event)
   $('detailGlyph').textContent = glyph(event.name)
@@ -672,13 +733,12 @@ function fillSong(event) {
   const dl = $('detailFacts')
   dl.replaceChildren()
   const entries = [
-    ['初听时间', `${dayLabel(event.date, true)} ${weekday(event.date)} ${event.time}（北京时间）`],
-    ['累计播放', event.play_count == null ? '暂无数据' : `${event.play_count.toLocaleString('zh-CN')} 次（网易云累计统计）`],
+    ['初听时间', `${dayLabel(event.date, true)} ${weekday(event.date)} ${event.time}`],
+    ['听了', event.play_count == null ? '—' : `${event.play_count.toLocaleString('zh-CN')} 遍`],
   ]
   if (event.album) entries.splice(1, 0, ['专辑', event.album])
   if (event.peak_count) entries.push(['听得最多的一天', `${event.peak_ms ? dayLabel(shanghaiDate(event.peak_ms), true) + '，' : ''}这一天听了 ${n(event.peak_count)} 遍`])
-  entries.push(['数据来源', '网易云音乐 · 回忆坐标'], ['原始时间戳', `${event.timestamp_local}\n${event.first_listen_ms}`, 'mono'])
-  if (event.status === 'conflict') entries.push(['时间有出入', '多次查询得到的初听时间不一致，时间线按最早同步到的版本显示。全部版本：' + event.observations.map(o => `${o.upstream_date || o.first_listen_ms}`).join('；')])
+  if (event.status === 'conflict') entries.push(['时间有出入', '网易云给过不止一个答案：' + event.observations.map(o => `${o.upstream_date || o.first_listen_ms}`).join('；')])
   for (const [title, text, cls] of entries) {
     const div = node('div'), dd = node('dd', cls || '')
     for (const [i, line] of text.split('\n').entries()) { if (i) dd.append(node('br')); dd.append(document.createTextNode(line)) }
@@ -713,20 +773,32 @@ function stepSong(delta) {
   if (!next) return
   const art = $('detailArt')
   if (motion) { art.classList.remove('swap'); void art.offsetWidth; art.classList.add('swap') }
-  fillSong(next)
+  fillSong(next, true) // if a song is playing, the next one follows
 }
 
 /* ---------- 弹窗 ---------- */
 function closeDialog(dialog) {
   if (!dialog.open) return
   if (!motion) { dialog.close(); return }
+  // The artwork flies back into its row when that row is on screen (shared-element morph, both ways).
+  if (dialog.id === 'songDialog' && document.startViewTransition) {
+    const event = state.view[state.current], cover = $('detailCover')
+    const target = event && document.querySelector(`.song[data-index="${event.index}"] .song-cover`)
+    const r = target?.getBoundingClientRect()
+    if (r && r.bottom > 0 && r.top < innerHeight && r.width) {
+      cover.style.viewTransitionName = 'song-art'
+      const t = document.startViewTransition(() => { cover.style.viewTransitionName = ''; dialog.close(); target.style.viewTransitionName = 'song-art' })
+      t.finished.finally(() => { target.style.viewTransitionName = '' })
+      return
+    }
+  }
   dialog.classList.add('is-closing')
   setTimeout(() => { dialog.classList.remove('is-closing'); dialog.close() }, 200)
 }
 for (const id of ['settingsDialog', 'songDialog', 'loginDialog']) {
   const d = $(id)
   d.addEventListener('cancel', e => { e.preventDefault(); closeDialog(d) })
-  d.addEventListener('close', () => tick())
+  d.addEventListener('close', () => { tick(); player?.render() })
   // Only a click on the backdrop closes; clicks in the dialog's own padding also target the dialog element.
   d.addEventListener('click', e => {
     if (e.target !== d) return
@@ -753,7 +825,7 @@ async function loadEvents(all = false, options = {}) {
     const result = await api('/api/events')
     if (id !== state.request) return
     index(result.events)
-    state.all = result.events
+    state.all = settings.likedOnly ? result.events.filter(e => e.sources?.includes(LIKED)) : result.events
     if (state.terms.length) state.results = state.all.filter(e => state.terms.every(t => e.hay.includes(t)))
     state.error = ''
   } catch (err) {
@@ -796,7 +868,7 @@ async function connect() {
   bar.disabled = true
   try {
     const backend = await backendReady
-    if (state.offline) throw new Error('现在没有网络，联网后再扫码')
+    if (state.offline) throw new Error('没网，等会儿再扫')
     if (backend.local) {
       if (!backend.configured) throw new Error('这个部署还没有配置 SESSION_SECRET，暂时只能浏览导入的档案')
       if (backend.sync.task) throw new Error('请先暂停同步，再连接账号')
@@ -807,7 +879,7 @@ async function connect() {
     await loadStatus(true)
     // Connecting means syncing: everything is fetched right away, no separate import step.
     await startSync({ quiet: true })
-    toast('连上了，正在把你的歌全部同步进来')
+    toast('连上啦，先把你喜欢的歌翻出来')
     return true
   }
   catch (err) { if (err.message !== '已取消连接') fail(err); renderStatus(); return false }
@@ -826,7 +898,7 @@ function qrLogin() {
       try {
         const result = await remote('/api/auth/check', { ticket })
         if (done || generation !== version) return
-        if (result.code === 803) { status('登录成功，马上开始同步', 'ok'); cleanup(); closeDialog(dialog); resolve(result.account); return }
+        if (result.code === 803) { status('连上啦', 'ok'); cleanup(); closeDialog(dialog); resolve(result.account); return }
         if (result.code === 802) status('已扫码，请在手机上点「确认登录」', 'ok')
         else if (result.code === 800) { status('二维码过期了，换一张再扫', 'warn'); $('loginQr').classList.add('expired') }
         else status('打开网易云音乐 App，扫一扫')
@@ -852,13 +924,13 @@ async function startSync(extra = {}) {
   if (running()) return
   if (!state.account || (state.local && !state.online)) { await connect(); return }
   try {
-    await api('/api/sync', { limit: 0, playlists: settings.playlists, retry_empty: false, history: settings.history, history_from: '', concurrency: 3, ...options })
-    if (!quiet) toast(options.covers_only ? '正在补全专辑封面' : '开始同步，查到的初听会陆续出现')
+    await api('/api/sync', { limit: 0, recent: settings.recent, playlists: settings.playlists, retry_empty: false, history: settings.history, history_from: '', concurrency: 3, ...options })
+    if (!quiet) toast(options.covers_only ? '补封面中' : '开始同步啦')
     await loadStatus()
   } catch (err) { if (!quiet || !/另一个标签页|已经有一个/.test(err.message)) fail(err) }
 }
 async function pauseSync() {
-  try { await api('/api/sync/pause', {}); toast('好的，手头这首查完就停，进度已保存'); await loadStatus() }
+  try { await api('/api/sync/pause', {}); toast('好，这首查完就停'); await loadStatus() }
   catch (err) { fail(err) }
 }
 function syncFinished(status) {
@@ -872,7 +944,7 @@ async function autoSync() {
   state.autoTried = true
   const stats = state.status?.stats || {}, run = state.status?.run
   const stale = !run?.updated_ms || Date.now() - run.updated_ms > 6 * 3600000
-  if (settings.auto && (stats.pending > 0 || run?.status === 'paused' || stale)) return startSync({ quiet: true })
+  if (settings.auto && (pendingNow(stats) > 0 || run?.status === 'paused' || stale)) return startSync({ quiet: true })
   if (stats.missing_covers > 0) return startSync({ quiet: true, covers_only: true })
 }
 
@@ -881,32 +953,34 @@ function renderSettings() {
   const has = Boolean(state.account), online = has && state.online && !state.offline, stats = state.status?.stats || {}
   $('setAvatar').textContent = has ? glyph(state.account.nickname) : '初'
   $('setName').textContent = has ? state.account.nickname : '还没有连接'
-  $('setState').textContent = !has ? '扫码后会自动把所有歌曲同步进来' : state.offline ? '离线中 · 档案和搜索照常可用' : online ? '已连接网易云音乐 · 登录 7 天内有效' : '只有本地档案 · 扫码登录后继续同步'
+  $('setState').textContent = !has ? '扫一下，你喜欢的歌就会自己排好队' : state.offline ? '没网也能翻' : online ? '已连上网易云' : '先看着本地的，扫码再接着同步'
   $('setLogin').textContent = !has ? '扫码连接' : online ? '重新扫码' : '扫码登录'
   $('setLogin').disabled = state.offline || running()
   $('setLogout').hidden = !online || !state.local
   $('retryEmpty').disabled = !online || running() || !stats.empty
-  $('retryEmpty').textContent = stats.empty ? `重新查询 ${n(stats.empty)} 首暂无记录的歌` : '没有需要重查的歌'
+  $('retryEmpty').textContent = stats.empty ? `再问一遍没查到的 ${n(stats.empty)} 首` : '没有要再问的歌'
   for (const id of ['exportJson', 'exportCsv']) $(id).disabled = !has
   $('archiveNote').textContent = has && stats.discovered
-    ? `${state.local ? '这个浏览器里' : '这台电脑上'}存着 ${n(stats.available)} 首初听、${n(stats.discovered)} 首歌曲。${state.local ? '换设备或清理浏览器前，先备份一份。' : ''}`
-    : state.local ? '档案只保存在这个浏览器里。已有备份文件的话，可以直接导入。' : '档案保存在这台电脑上。'
+    ? `这里存着 ${n(stats.available)} 首初听。${state.local ? '换设备前，记得带一份走。' : ''}`
+    : '有备份文件的话，直接导进来。'
+  // Older, wider syncs may have left non-liked songs; they stay, and can be tucked away.
+  $('likedOnlyRow').hidden = !(stats.liked_available < stats.available) && !settings.likedOnly
 }
 function renderOffline(text) { $('offlineNote').textContent = text }
 async function setupOffline(backend) {
   if (!backend.local) { $('offlineNote').closest('.set-group').hidden = true; return }
-  if (!('serviceWorker' in navigator)) { renderOffline('这个浏览器不支持离线使用。'); return }
-  const ready = '已可离线使用：断网时也能打开初听，翻看和搜索整份档案；看过的专辑封面也会留一份。'
+  if (!('serviceWorker' in navigator)) { renderOffline('这个浏览器还不支持离线。'); return }
+  const ready = '断网也能翻、也能搜。'
   try {
     const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
     if (navigator.serviceWorker.controller) renderOffline(ready)
     else {
-      renderOffline('正在准备离线版本…')
+      renderOffline('离线版准备中…')
       navigator.serviceWorker.addEventListener('controllerchange', () => renderOffline(ready), { once: true })
     }
     // Check for a new version whenever the tab comes back; the worker itself always prefers the network.
     document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}) })
-  } catch { renderOffline('离线版本没能准备好，在线使用不受影响。') }
+  } catch { renderOffline('离线版没准备好，在线照常用。') }
   addEventListener('beforeinstallprompt', event => {
     event.preventDefault()
     const button = $('installApp') || node('button', 'button ghost', '安装到桌面')
@@ -959,6 +1033,32 @@ function setupPointerEffects() {
     })
   })
   stage.addEventListener('pointerleave', () => { stage.style.setProperty('--tx', 0); stage.style.setProperty('--ty', 0) })
+  // Cursor-aware depth: the hero title layers drift apart, the intro cards tilt toward the cursor.
+  const hero = document.querySelector('.hero')
+  let heroFrame = 0
+  hero.addEventListener('pointermove', e => {
+    if (!motion || heroFrame) return
+    heroFrame = requestAnimationFrame(() => {
+      heroFrame = 0
+      const r = hero.getBoundingClientRect()
+      hero.style.setProperty('--px', ((e.clientX - r.left) / r.width - .5).toFixed(3))
+      hero.style.setProperty('--py', ((e.clientY - r.top) / r.height - .5).toFixed(3))
+    })
+  })
+  hero.addEventListener('pointerleave', () => { hero.style.setProperty('--px', 0); hero.style.setProperty('--py', 0) })
+  const steps = document.querySelector('.intro-steps')
+  let cardFrame = 0
+  steps?.addEventListener('pointermove', e => {
+    const card = e.target.closest('li')
+    if (!motion || !card || cardFrame) return
+    cardFrame = requestAnimationFrame(() => {
+      cardFrame = 0
+      const r = card.getBoundingClientRect()
+      card.style.setProperty('--rx', ((e.clientX - r.left) / r.width - .5).toFixed(3))
+      card.style.setProperty('--ry', ((e.clientY - r.top) / r.height - .5).toFixed(3))
+    })
+  })
+  steps?.addEventListener('pointerout', e => { const card = e.target.closest('li'); if (card && !card.contains(e.relatedTarget)) { card.style.removeProperty('--rx'); card.style.removeProperty('--ry') } })
 }
 if ('IntersectionObserver' in window) {
   new IntersectionObserver(([e]) => { $('toTop').hidden = e.isIntersecting }, { rootMargin: '0px 0px -40% 0px' }).observe(document.querySelector('.hero'))
@@ -988,6 +1088,7 @@ reduced.addEventListener?.('change', () => {
 requestAnimationFrame(() => document.documentElement.classList.add('ready'))
 setupPointerEffects()
 setupHighlights()
+rotate($('closingLine'), CLOSING_LINES, { interval: 12500, delay: 6000 })
 $('barAction').addEventListener('click', e => { const a = e.currentTarget.dataset.action; if (a === 'connect') connect(); else if (a === 'sync') startSync(); else if (a === 'pause') pauseSync() })
 $('heroAction').addEventListener('click', e => e.currentTarget.dataset.action === 'connect' ? connect() : startSync())
 $('settingsButton').addEventListener('click', () => { renderSettings(); openModal($('settingsDialog')) })
@@ -1020,13 +1121,17 @@ document.addEventListener('keydown', e => {
   $('timelineSection').scrollIntoView({ behavior: motion ? 'smooth' : 'auto', block: 'start' })
 })
 $('pauseButton').addEventListener('click', pauseSync)
-for (const [id, key] of [['optAuto', 'auto'], ['optHistory', 'history'], ['optPlaylists', 'playlists']]) {
+for (const [id, key] of [['optAuto', 'auto'], ['optRecent', 'recent'], ['optHistory', 'history'], ['optPlaylists', 'playlists'], ['optLikedOnly', 'likedOnly']]) {
   $(id).checked = settings[key]
-  $(id).addEventListener('change', e => { settings[key] = e.target.checked; save('chuting-settings', settings) })
+  $(id).addEventListener('change', e => {
+    settings[key] = e.target.checked; save('chuting-settings', settings)
+    if (key === 'likedOnly') loadEvents(true)
+    else renderStatus()
+  })
 }
 $('setLogin').addEventListener('click', () => { closeDialog($('settingsDialog')); connect() })
 $('setLogout').addEventListener('click', async () => {
-  try { await (await backendReady).logout(); state.online = false; renderStatus(); toast('已退出登录，本地档案还在') } catch (err) { fail(err) }
+  try { await (await backendReady).logout(); state.online = false; renderStatus(); toast('已退出，档案还在') } catch (err) { fail(err) }
 })
 $('retryEmpty').addEventListener('click', () => { closeDialog($('settingsDialog')); startSync({ retry_empty: true }) })
 $('importButton').addEventListener('click', () => $('importFile').click())
@@ -1048,15 +1153,33 @@ for (const id of ['exportJson', 'exportCsv']) $(id).addEventListener('click', as
   try {
     const backend = await backendReady, format = id === 'exportCsv' ? 'csv' : 'json'
     if (backend.local) await backend.download(format); else location.href = `/api/export?format=${format}`
-    toast(format === 'json' ? '备份已下载，换设备时导入它就行' : 'CSV 已下载')
+    toast(format === 'json' ? '备份好了' : 'CSV 已下载')
   } catch (err) { fail(err) }
 })
 addEventListener('online', () => { state.offline = false; renderStatus(); checkSession().then(autoSync) })
+/* ---------- 播放器 ---------- */
+// Plays through the worker's song_url (the account's own rights); prev/next and the end of a song move along the timeline.
+const playerAt = (event, delta) => { const i = state.view.findIndex(x => x.song_id === event?.song_id); return i < 0 ? null : state.view[i + delta] }
+function playRelative(delta) {
+  const next = playerAt(player.current, delta)
+  if (!next) return
+  if ($('songDialog').open && state.view[state.current]?.song_id === player.current?.song_id) fillSong(next)
+  player.play(next)
+}
+player = createPlayer({
+  els: { root: $('player'), dialog: $('songDialog'), play: $('playBtn'), seek: $('seek'), scrub: $('scrub'), cur: $('curTime'), dur: $('durTime'), note: $('playerNote'), volume: finePointer ? $('volume') : null },
+  mini: { root: $('miniPlayer'), play: $('miniPlay'), open: $('miniOpen'), close: $('miniClose'), title: $('miniTitle'), artist: $('miniArtist'), cover: $('miniCover') },
+  getUrl: event => remote('/api/netease', { method: 'song_url', query: { id: String(event.song_id) }, uid: state.account?.uid }),
+  coverFor: event => (event.cover ? px => coverSize(event.cover, px) : null),
+  onEnded: () => playRelative(1),
+  onOpen: event => showSong(state.view.find(x => x.song_id === event.song_id) || event)
+})
+player.setActions(() => playRelative(-1), () => playRelative(1))
+if (!finePointer) $('volume').closest('.player-vol').hidden = true
 addEventListener('offline', () => { state.offline = true; state.online = false; renderStatus() })
 backendReady.then(backend => {
   state.local = backend.local
   $('historyRow').hidden = !backend.local
-  $('storageNote').textContent = backend.local ? '档案只保存在这个浏览器里 · 断网也能翻看 · 时间按北京时间显示' : '所有数据只保存在这台电脑上 · 时间按北京时间显示'
   setupOffline(backend)
   renderStatus()
 }).catch(() => {})

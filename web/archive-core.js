@@ -72,6 +72,13 @@ export function needsQuery(song, retryEmpty = false, now = Date.now()) {
   if (song.first_listen_ms) return false
   return song.status !== 'empty' || retryEmpty || now - (song.last_attempt_ms || 0) >= 30 * DAY
 }
+// Sync scope. Liked songs (我喜欢的音乐) are always in; the other sources are opt-in.
+export const LIKED = '喜欢的歌曲'
+export const RECENT_SOURCES = ['最近播放', '本周排行', '累计排行']
+export function inScope(song, scope = {}) {
+  return (song.sources || []).some(x => x === LIKED || (scope.recent && RECENT_SOURCES.includes(x)) || (scope.playlists && x === '我的歌单')
+    || (scope.history && /^(历史月榜|年度报告)/.test(x)))
+}
 export function eventFromSong(song) {
   const { raw, id, uid, error, ...event } = song
   // Archives synced before peak_* existed still carry the original response.
@@ -92,6 +99,9 @@ export function archiveStatus(songs) {
       empty: songs.filter(s => s.status === 'empty').length, failed: songs.filter(s => s.status === 'failed').length,
       conflicts: songs.filter(s => s.observations?.length > 1).length,
       missing_covers: songs.filter(s => s.first_listen_ms && !s.cover && !s.cover_checked_ms).length,
+      liked: songs.filter(s => s.sources?.includes(LIKED)).length,
+      liked_available: events.filter(e => e.sources?.includes(LIKED)).length,
+      pending_liked: songs.filter(s => s.sources?.includes(LIKED) && ['pending', 'failed'].includes(s.status)).length,
       sources: [...sourceCounts].map(([source, count]) => ({ source, count })) },
     calendar: { months: [...new Set(events.map(e => e.date.slice(0, 7)))], days: new Set(events.map(e => e.date)).size,
       earliest: events[0]?.date, latest: events.at(-1)?.date } }

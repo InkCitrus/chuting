@@ -1,9 +1,9 @@
-import { metadata, reportSongs, monthEnds, needsQuery, DAY } from './archive-core.js'
+import { metadata, reportSongs, monthEnds, needsQuery, inScope, DAY } from './archive-core.js'
 const STOP_CODES = [301, 401, 403, 429, 460]
 const THROTTLED = [429, 460]
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-// Songs from these sources are queried first, so the newest part of the timeline fills in early.
-const PRIORITY = ['最近播放', '本周排行', '累计排行', '喜欢的歌曲', '我的歌单']
+// Liked songs first (newest like first), then the opt-in sources.
+const PRIORITY = ['喜欢的歌曲', '最近播放', '本周排行', '累计排行', '我的歌单']
 const rank = song => Math.min(...(song.sources || []).map(s => { const i = PRIORITY.indexOf(s); return i < 0 ? PRIORITY.length : i }), PRIORITY.length)
 export class BrowserSync {
   // Adaptive pacing: requests start at most every `interval` ms (shared by all lanes and retries).
@@ -36,7 +36,7 @@ export class BrowserSync {
         if (THROTTLED.includes(err.code) && throttled < 2 && ++this.throttles <= 3 && !this.stop) {
           throttled++
           this.interval = Math.min(this.maxInterval, Math.max(900, this.interval * 3))
-          if (this.run) await this.phase(`网易云让我们慢一点，${Math.round(this.cooldown * throttled / 1000)} 秒后放慢速度继续…`).catch(() => {})
+          if (this.run) await this.phase(`网易云说慢点，歇 ${Math.round(this.cooldown * throttled / 1000)} 秒再来…`).catch(() => {})
           await this.wait(this.cooldown * throttled)
           continue
         }
@@ -77,19 +77,20 @@ export class BrowserSync {
       if (this.stop) throw new Error('PAUSED')
       await this.phase('查找歌曲 · ' + label)
       try { await fn() }
-      catch (err) { if (STOP_CODES.includes(err.code) || err.message === 'PAUSED') throw err; warnings.push(label + '未能读取') }
+      catch (err) { if (STOP_CODES.includes(err.code) || err.message === 'PAUSED') throw err; warnings.push(label + '没读到') }
     }
-    if (!options.history_only) await optional('最近播放', async () => {
+    if (!options.history_only && options.recent) await optional('最近播放', async () => {
       const b = await this.request('record_recent_song')
       await this.store.candidates(uid, (b.data?.list || []).map(x => metadata(x.data)).filter(Boolean), '最近播放')
     })
-    if (!options.history_only) for (const type of [0, 1]) await optional(type ? '本周排行' : '累计排行', async () => {
+    if (!options.history_only && options.recent) for (const type of [0, 1]) await optional(type ? '本周排行' : '累计排行', async () => {
       const b = await this.request('user_record', { type })
       await this.store.candidates(uid, (b[type ? 'weekData' : 'allData'] || []).map(x => metadata(x.song)).filter(Boolean), type ? '本周排行' : '累计排行')
     })
     if (!options.history_only) await optional('喜欢的歌曲', async () => {
       const b = await this.request('likelist')
-      await this.store.candidates(uid, (b.ids || []).map(id => ({ id })), '喜欢的歌曲')
+      // likelist is ordered newest like first; the rank lets the newest likes be dated first.
+      await this.store.candidates(uid, (b.ids || []).map((id, like_rank) => ({ id, like_rank })), '喜欢的歌曲')
     })
     if (options.playlists && !options.history_only) await optional('我的歌单', async () => {
       const visited = new Set()
@@ -149,7 +150,7 @@ export class BrowserSync {
         const rows = ((await this.request('song_detail', { ids: chunk.map(s => s.id).join(',') })).songs || []).map(metadata).filter(Boolean)
         await this.store.candidates(this.uid, rows, null)
         await this.store.covers(this.uid, new Map(rows.map(r => [r.id, r.cover])), chunk.map(s => s.id))
-      } catch (err) { if (STOP_CODES.includes(err.code) || err.message === 'PAUSED') throw err; warnings.push('部分歌曲名称或封面未能读取') }
+      } catch (err) { if (STOP_CODES.includes(err.code) || err.message === 'PAUSED') throw err; warnings.push('有些歌名或封面没读到') }
     }
     return warnings
   }
@@ -161,17 +162,18 @@ export class BrowserSync {
       const missing = (await this.store.songs(this.uid)).filter(s => s.first_listen_ms && !s.cover && !s.cover_checked_ms)
         .sort((a, b) => b.first_listen_ms - a.first_listen_ms)
       const warnings = await this.details(missing, '补全专辑封面')
-      Object.assign(this.run, { status: this.stop ? 'paused' : 'completed', phase: this.stop ? '已暂停，进度已保存' : '专辑封面补好了', error: warnings[0] || null })
+      Object.assign(this.run, { status: this.stop ? 'paused' : 'completed', phase: this.stop ? '停了，进度都在' : '封面补好了', error: warnings[0] || null })
     } catch (err) {
-      Object.assign(this.run, { status: err.message === 'PAUSED' ? 'paused' : 'failed', phase: '封面暂时没能补全，下次同步会再试', error: err.message === 'PAUSED' ? null : err.message })
+      Object.assign(this.run, { status: err.message === 'PAUSED' ? 'paused' : 'failed', phase: '封面没补全，下次再来', error: err.message === 'PAUSED' ? null : err.message })
     }
     await this.saveRun()
   }
   // Queries everything currently pending (recent sources first). Called once per discovery pass.
   async drain(options, warnings) {
     const songs = await this.store.songs(this.uid)
-    let queue = songs.filter(s => needsQuery(s, options.retry_empty))
-      .sort((a, b) => (a.attempts || 0) - (b.attempts || 0) || rank(a) - rank(b) || a.id.localeCompare(b.id))
+    // Only songs from the enabled sources are queried (liked songs always); others already in the archive stay untouched.
+    let queue = songs.filter(s => needsQuery(s, options.retry_empty) && inScope(s, options))
+      .sort((a, b) => (a.attempts || 0) - (b.attempts || 0) || rank(a) - rank(b) || (a.like_rank ?? 1e9) - (b.like_rank ?? 1e9) || a.id.localeCompare(b.id))
     if (options.limit) queue = queue.slice(0, Math.max(0, options.limit - this.run.queried))
     // ID-only candidates and songs without art get metadata in batches, rather than one extra call per song.
     const queued = new Set(queue.map(s => s.id))
@@ -212,7 +214,7 @@ export class BrowserSync {
     try {
       const current = await this.request('login_status')
       if (current.account?.uid !== account.uid) throw new Error('登录账号与本地档案不一致，请重新连接')
-      // Pass 1: recent plays, rankings, likes and playlists are cheap to find, so their dates show up within seconds.
+      // Pass 1: liked songs (plus recent plays, rankings and playlists when enabled) are cheap to find, so their dates show up within seconds.
       warnings.push(...await this.discover({ ...options, basic_only: true }))
       await this.drain(options, warnings)
       // Pass 2: monthly and annual reports reach further back; dozens of calls, so they come second.
@@ -221,12 +223,12 @@ export class BrowserSync {
         await this.drain(options, warnings)
       }
       this.run.status = this.stop ? 'paused' : 'completed'
-      this.run.phase = this.stop ? '已暂停，进度已保存' : '这一批同步好了'
+      this.run.phase = this.stop ? '停了，进度都在' : '同步好了'
       const unique = [...new Set(warnings)]
       this.run.error = unique.length ? unique.slice(0, 5).join('；') + (unique.length > 5 ? `；另有 ${unique.length - 5} 项未读取` : '') : null
     } catch (err) {
       this.run.status = err.message === 'PAUSED' ? 'paused' : 'failed'
-      this.run.phase = err.message === 'PAUSED' ? '已暂停，进度已保存' : '同步已停止，进度已保存'
+      this.run.phase = err.message === 'PAUSED' ? '停了，进度都在' : '先停一下，进度都在'
       this.run.error = err.message === 'PAUSED' ? null : err.message
     }
     await this.saveRun()

@@ -22,6 +22,9 @@
   <link rel="modulepreload" href="/browser-sync.js">
   <link rel="modulepreload" href="/archive-core.js">
   <link rel="modulepreload" href="/insights.js">
+  <link rel="modulepreload" href="/rotator.js">
+  <link rel="modulepreload" href="/copy.js">
+  <link rel="modulepreload" href="/player.js">
   <script src="/app.js" type="module"></script>
 </head>
 <body>
@@ -48,6 +51,7 @@
       <div class="hero-text">
         <p class="kicker" id="heroKicker">网易云音乐 · 初听档案</p>
         <h1 class="hero-title" id="heroTitle"><span class="hero-pre">你的</span><em><b>初</b><b>听</b></em></h1>
+        <p class="hero-tagline" id="heroTagline"></p>
         <p class="hero-story" id="heroStory"></p>
         <p class="hero-sub" id="heroSub"></p>
         <div class="hero-actions">
@@ -77,11 +81,10 @@
     <section class="intro" id="intro" aria-labelledby="introTitle" hidden>
       <h2 class="intro-title" id="introTitle">扫一次码，剩下的交给它</h2>
       <ol class="intro-steps">
-        <li><span class="step-num">01</span><h3>扫码连接</h3><p>用网易云音乐 App 扫一扫。登录状态加密保存，7 天后自动失效。</p></li>
-        <li><span class="step-num">02</span><h3>自动同步</h3><p>连上后，最近播放、排行、喜欢的歌、歌单和历史月榜里的歌会自动找齐，逐首查出初听时间。</p></li>
-        <li><span class="step-num">03</span><h3>慢慢翻看</h3><p>每首歌回到你第一次听见它的那一天。断网也能翻，换设备时在设置里备份带走。</p></li>
+        <li><span class="step-num">01</span><h3>扫一下</h3><p>打开网易云音乐 App，扫一下就好。</p></li>
+        <li><span class="step-num">02</span><h3>它去翻</h3><p>把「我喜欢的音乐」一首首翻出来，问问你们是哪天认识的。</p></li>
+        <li><span class="step-num">03</span><h3>你来逛</h3><p>每首歌都回到你第一次听见它的那天。</p></li>
       </ol>
-      <p class="intro-note"><span class="ok-dot" aria-hidden="true"></span>档案只保存在这个浏览器里，不上传到任何服务器。已有备份？在右上角的设置里导入。</p>
     </section>
 
     <section class="timeline-section" id="timelineSection" aria-labelledby="timelineTitle">
@@ -89,6 +92,7 @@
         <div class="timeline-heading">
           <h2 id="timelineTitle">时间线</h2>
           <p id="timelineMeta" class="timeline-meta" aria-live="polite"></p>
+          <p id="timelineLede" class="timeline-lede"></p>
         </div>
         <div class="timeline-tools" id="timelineTools">
           <label class="search">
@@ -112,12 +116,18 @@
     </section>
 
     <footer class="closing">
-      <p class="closing-line">这里只记录每首歌的<strong>第一次</strong>，<br class="mobile-break">不是每天完整的听歌记录。</p>
-      <p class="closing-note"><span class="ok-dot" aria-hidden="true"></span><span id="storageNote">档案只保存在这个浏览器里 · 时间按北京时间显示</span></p>
+      <p class="closing-line" id="closingLine">第一次只有一次，所以值得<strong>记下来</strong>。</p>
+      <p class="closing-note"><span id="storageNote">做给每个会为一首歌停下来的人。</span></p>
     </footer>
   </main>
 
   <button type="button" class="to-top" id="toTop" aria-label="回到开头" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button>
+
+  <div class="mini-player" id="miniPlayer" hidden>
+    <button type="button" class="mini-open" id="miniOpen" aria-label="打开正在播放的歌"><span class="mini-cover" id="miniCover" aria-hidden="true"></span><span class="mini-text"><b id="miniTitle"></b><small id="miniArtist"></small></span></button>
+    <button type="button" class="icon-button mini-play" id="miniPlay" aria-label="暂停"><svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8z"/></svg><svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9"/></svg></button>
+    <button type="button" class="icon-button" id="miniClose" aria-label="停止播放"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+  </div>
 
   <dialog id="settingsDialog" class="sheet" aria-labelledby="settingsTitle">
     <button type="button" class="dialog-close icon-button" id="closeSettings" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
@@ -125,20 +135,23 @@
     <h2 id="settingsTitle">档案与同步</h2>
     <section class="set-group" aria-labelledby="setAccountTitle">
       <h3 id="setAccountTitle">账号</h3>
-      <div class="account-card"><span class="avatar" id="setAvatar" aria-hidden="true">初</span><span class="account-text"><b id="setName">还没有连接</b><span id="setState">扫码后会自动把所有歌曲同步进来</span></span></div>
+      <div class="account-card"><span class="avatar" id="setAvatar" aria-hidden="true">初</span><span class="account-text"><b id="setName">还没有连接</b><span id="setState">扫一下，你喜欢的歌就会自己排好队</span></span></div>
       <div class="set-actions"><button type="button" class="button ghost" id="setLogin">扫码登录</button><button type="button" class="text-button" id="setLogout" hidden>退出登录</button></div>
     </section>
     <section class="set-group" id="setSync" aria-labelledby="setSyncTitle">
       <h3 id="setSyncTitle">同步</h3>
-      <label class="switch-row"><span><b>打开页面时自动同步</b><small>只补新歌和还没查完的，查过的会跳过</small></span><input type="checkbox" id="optAuto" role="switch" checked></label>
-      <label class="switch-row" id="historyRow"><span><b>也翻历史月榜和年度报告</b><small>能找回更早听过的歌；第一次会多花一两分钟</small></span><input type="checkbox" id="optHistory" role="switch" checked></label>
-      <label class="switch-row"><span><b>从我创建的歌单里找歌</b><small>歌单越多，第一次同步越久</small></span><input type="checkbox" id="optPlaylists" role="switch" checked></label>
-      <div class="set-actions"><button type="button" class="button ghost" id="retryEmpty">重新查询暂无记录的歌</button></div>
-      <p class="set-note" id="syncNote">请求间隔会自动调整：顺利时加快，网易云提示太频繁时放慢并稍候重试。进度随时保存，关掉页面也能接着来。</p>
+      <label class="switch-row"><span><b>打开就同步</b><small>只补新的，查过的不再查</small></span><input type="checkbox" id="optAuto" role="switch" checked></label>
+      <h4 class="set-sub">从哪儿找歌</h4>
+      <div class="switch-row is-fixed"><span><b>我喜欢的音乐</b><small>一直都在</small></span><span class="fixed-on" aria-hidden="true">✓</span></div>
+      <label class="switch-row" id="recentRow"><span><b>最近播放和听歌排行</b></span><input type="checkbox" id="optRecent" role="switch"></label>
+      <label class="switch-row"><span><b>我建的歌单</b></span><input type="checkbox" id="optPlaylists" role="switch"></label>
+      <label class="switch-row" id="historyRow"><span><b>历史月榜和年度报告</b><small>能翻到更早的歌，第一次会慢一点</small></span><input type="checkbox" id="optHistory" role="switch"></label>
+      <div class="set-actions"><button type="button" class="button ghost" id="retryEmpty">再问一遍没查到的歌</button></div>
     </section>
     <section class="set-group" aria-labelledby="setArchiveTitle">
       <h3 id="setArchiveTitle">备份与导入</h3>
-      <p class="set-note" id="archiveNote">档案只保存在这个浏览器里。换设备或清理浏览器前，先备份一份。</p>
+      <p class="set-note" id="archiveNote">有备份文件的话，直接导进来。</p>
+      <label class="switch-row" id="likedOnlyRow" hidden><span><b>只看我喜欢的</b><small>其他歌还在，先收起来</small></span><input type="checkbox" id="optLikedOnly" role="switch"></label>
       <div class="set-actions">
         <button type="button" class="button ghost" id="exportJson">备份 JSON</button>
         <button type="button" class="button ghost" id="exportCsv">导出 CSV</button>
@@ -148,7 +161,7 @@
     </section>
     <section class="set-group" aria-labelledby="setOfflineTitle">
       <h3 id="setOfflineTitle">离线</h3>
-      <p class="set-note" id="offlineNote">正在准备离线版本…</p>
+      <p class="set-note" id="offlineNote">离线版准备中…</p>
     </section>
   </dialog>
 
@@ -156,7 +169,7 @@
     <button type="button" class="dialog-close icon-button" id="closeLogin" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
     <p class="kicker">连接网易云音乐</p>
     <h2 id="loginTitle">扫一扫，剩下的交给初听</h2>
-    <p class="dialog-copy">用网易云音乐 App 扫码并在手机上确认。连上后会自动同步全部歌曲，档案只留在这台设备。</p>
+    <p class="dialog-copy">用网易云音乐 App 扫一扫，在手机上点确认就好。</p>
     <div class="qr-frame"><img id="loginQr" class="login-qr" width="240" height="240" alt="网易云音乐登录二维码" hidden><span class="qr-placeholder" aria-hidden="true"></span></div>
     <p id="loginStatus" class="login-status" role="status">正在生成二维码…</p>
     <button type="button" class="button ghost" id="refreshQr">换一张二维码</button>
@@ -168,6 +181,14 @@
     <p class="kicker" id="detailKicker">初听档案</p>
     <h2 id="detailName"></h2>
     <p id="detailArtists" class="dialog-copy"></p>
+    <div class="player" id="player" hidden>
+      <button type="button" class="play-btn" id="playBtn" aria-label="播放"><svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8z"/></svg><svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9"/></svg><span class="play-ring" aria-hidden="true"></span></button>
+      <div class="player-main">
+        <div class="scrub" id="scrub"><input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="播放进度"></div>
+        <div class="player-times"><span id="curTime">0:00</span><span class="player-note" id="playerNote" hidden></span><span id="durTime">0:00</span></div>
+      </div>
+      <label class="player-vol"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6h2.5L9 3v10L5.5 10H3zM11.5 5.5a3.5 3.5 0 0 1 0 5"/></svg><input type="range" id="volume" min="0" max="1" step="0.01" aria-label="音量"></label>
+    </div>
     <dl id="detailFacts"></dl>
     <div class="detail-actions">
       <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>

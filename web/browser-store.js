@@ -78,6 +78,7 @@ export class BrowserStore {
         const cover = coverUrl(item.cover)
         if (cover) merged.cover = cover
         if (source) merged.sources = [...new Set([...merged.sources, source])]
+        if (Number.isInteger(item.like_rank)) merged.like_rank = item.like_rank
         table.put(merged); written.push(merged)
       }
     })

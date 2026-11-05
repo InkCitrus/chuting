@@ -62,7 +62,11 @@ Pages CLI 不支持自定义配置路径，因此使用根目录的标准 `wrang
 
 离线：`web/sw.js` 是同源 Service Worker。页面和模块走「网络优先」，只有断网时才用缓存，所以发布后不会继续跑旧代码；`npm run build:pages` 会把 `dist/pages` 的内容哈希写进缓存名，旧缓存在新版本激活时删除。`_headers` 让 `/sw.js` 不缓存，浏览器每次都能检查更新。`/api/*` 从不经过缓存。档案本身在 IndexedDB 里，断网也能翻看和搜索。
 
-专辑封面直接从网易云图片 CDN（`https://*.music.126.net`）加载，带 `?param=120y120` 等尺寸参数；CSP 的 `img-src` / `connect-src` 只额外放行这个域名。看过的封面由 Service Worker 留存（最多 600 张，超出时先删最早的）。
+专辑封面直接从网易云图片 CDN（`https://*.music.126.net`）加载，带 `?param=120y120` 等尺寸参数；CSP 的 `img-src` / `connect-src` / `media-src` 只额外放行这个域名。看过的封面由 Service Worker 留存（最多 600 张，超出时先删最早的）。
+
+## 播放
+
+歌曲详情里的播放器通过 `/api/netease` 的 `song_url` 方法取地址：Worker 带上完整登录 Cookie（MUSIC_U 等）请求 `song/enhance/player/url/v1`，先要 exhigh，拿不到或只有试听片段时退回 standard。会员账号能直接拿到完整音源；账号确实没有版权时才标记为试听或不可播放。音频由浏览器直接从 `*.music.126.net` 加载（地址有签名、几分钟过期），不经 Worker 代理，也不进 Service Worker 缓存；离线时播放器禁用。
 
 内容安全策略只允许同源脚本。如果在 Pages 控制台开启了 Web Analytics，Cloudflare 自动注入的 `static.cloudflareinsights.com` 信标会被拦截，并在控制台报错。初听不收集访问数据，建议在项目的 Metrics → Web Analytics 中关闭自动注入，不要放宽 CSP。
 
@@ -102,7 +106,8 @@ python3 scripts/export_browser.py --data-dir data --output exports/chuting-brows
 ## 抓取改进
 
 - 同时查询 1 或 2 首，两条通道及重试共用 650ms 发起间隔。网络较慢时可以重叠等待，不保证速度翻倍。
-- 候选来自最近播放、累计排行、本周排行、喜欢的歌曲和自建歌单。只有 ID 的歌曲批量补充名字。
+- 默认只同步「我喜欢的音乐」，从最近喜欢的开始往回查。最近播放与听歌排行、自建歌单、历史月榜和年度报告都在设置里单独打开。只有 ID 的歌曲批量补充名字。
+- 每首歌的初听时间直接来自 `music_first_listen_info`，其他来源只用来发现更多歌曲，不参与定日期。
 - 历史扫描自动从听歌足迹最早年份开始，或手动指定 2017 年以来的起点。逐月扫描到本月，再查年度报告。
 - 月榜、报告中的明确 `songId` 只作为候选；`firstDate`、月榜日期和次数都不能生成初听事实。
 - 成功扫描后保存检查点：当月 1 天内、历史月份和年度报告 30 天内跳过。失败来源不会标记成功，下次继续补查，并在任务状态中提示。

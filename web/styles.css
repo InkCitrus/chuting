@@ -28,10 +28,27 @@
   --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "Source Serif Pro", Georgia, serif;
   --display: "Iowan Old Style", "Source Serif Pro", "Palatino Linotype", Georgia, var(--serif);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --ease: cubic-bezier(.2, .75, .15, 1);
-  --spring: cubic-bezier(.34, 1.4, .5, 1);
+  /* 动效系统：所有动画共用这几条曲线和时长 */
+  --ease: cubic-bezier(.2, .75, .15, 1);      /* 出场、滑入：快起慢收 */
+  --ease-in: cubic-bezier(.55, 0, .8, .25);    /* 退场 */
+  --ease-io: cubic-bezier(.65, 0, .35, 1);     /* 往复、呼吸 */
+  --spring: cubic-bezier(.34, 1.4, .5, 1);     /* 回弹（不支持 linear() 时） */
+  --spring-soft: cubic-bezier(.3, 1.15, .5, 1);
+  --d-1: .18s; --d-2: .32s; --d-3: .55s; --d-4: .9s; --d-5: 1.4s;
+  --stagger: 60ms;
+  --copy-ms: 22ms;  /* 轮换文案逐字间隔 */
   --bar: 62px;
   --wide: 1200px;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    /* 阻尼弹簧（ζ≈.55 / .8），由弹簧方程采样 */
+    --spring: linear(0, .103, .331, .589, .815, .98, 1.079, 1.122, 1.123, 1.101, 1.069, 1.038, 1.012, .996, .987, .984, .986, .989, .993, .997, 1, 1.001, 1.002, 1.002, 1.002, 1.001, 1.001, 1, 1);
+    --spring-soft: linear(0, .062, .202, .366, .526, .665, .777, .861, .922, .964, .99, 1.005, 1.012, 1.015, 1.015, 1.013, 1.01, 1.008, 1.006, 1.004, 1.002, 1.001, 1.001, 1, 1);
+  }
+}
+@media (max-width: 700px), (hover: none) {
+  :root { --d-3: .45s; --d-4: .7s; --d-5: 1s; --stagger: 45ms; --copy-ms: 16ms }
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -148,19 +165,23 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .hero-title em { font-style: normal; display: inline-flex; padding: .04em .06em .1em 0 }
 .hero-title em b { font-weight: inherit; display: inline-block; color: var(--ink) }
 .hero-title em b:nth-child(1) { color: var(--accent) }
+/* 开场编排：眉题 → “你的” → 初、听落字 → 引言 → 正文 → 操作；右侧唱片随后落下 */
 @media (prefers-reduced-motion: no-preference) {
-  .hero-pre { animation: rise-in 1s var(--ease) both .05s }
-  .hero-title em b { animation: char-in 1.2s var(--ease) both }
-  .hero-title em b:nth-child(1) { animation-delay: .12s }
-  .hero-title em b:nth-child(2) { animation-delay: .24s }
-  .hero-text > .kicker, .hero-story, .hero-sub, .hero-actions { animation: rise-in .9s var(--ease) both }
-  .hero-story { animation-delay: .38s }
-  .hero-sub { animation-delay: .5s }
-  .hero-actions { animation-delay: .6s }
-  .highlights:not([hidden]) { animation: rise-in 1.1s var(--ease) both .45s }
+  .hero-text > .kicker { animation: rise-in var(--d-4) var(--ease) both }
+  .hero-pre { animation: rise-in var(--d-4) var(--ease) both calc(var(--stagger) * 1.5) }
+  .hero-title em b { animation: char-in var(--d-5) var(--spring-soft) both }
+  .hero-title em b:nth-child(1) { animation-delay: calc(var(--stagger) * 3) }
+  .hero-title em b:nth-child(2) { animation-delay: calc(var(--stagger) * 5) }
+  .hero-tagline { animation: blur-in var(--d-5) var(--ease) both calc(var(--stagger) * 7) }
+  .hero-story, .hero-sub, .hero-actions { animation: rise-in var(--d-4) var(--ease) both }
+  .hero-story { animation-delay: calc(var(--stagger) * 9) }
+  .hero-sub { animation-delay: calc(var(--stagger) * 11) }
+  .hero-actions { animation-delay: calc(var(--stagger) * 12) }
+  .highlights:not([hidden]) .hl-controls { animation: rise-in var(--d-4) var(--ease) both calc(var(--stagger) * 14) }
 }
-@keyframes char-in { from { opacity: 0; transform: translateY(.32em) rotate(6deg) scale(.92) } }
+@keyframes char-in { from { opacity: 0; transform: translateY(.42em) rotate(7deg) scale(.9) } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(16px) } }
+@keyframes blur-in { from { opacity: 0; transform: translateY(8px); filter: blur(6px) } }
 @supports (animation-timeline: scroll()) {
   @media (prefers-reduced-motion: no-preference) {
     .motion .hero-title { animation: hero-out linear both; animation-timeline: scroll(root); animation-range: 0 90vh }
@@ -168,6 +189,8 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 }
 @keyframes hero-out { to { transform: translateY(-70px) scale(.97); opacity: .15 } }
 
+.hero-tagline { font-family: var(--serif); font-size: clamp(17px, 1.6vw, 21px); line-height: 1.6; color: var(--ink-2); margin: 26px 0 0; max-width: 30em; letter-spacing: .02em }
+.hero-tagline::before { content: ""; display: inline-block; vertical-align: middle; width: 28px; height: 1px; margin: -.2em 12px 0 0; background: var(--accent) }
 .hero-story { font-family: var(--serif); font-size: clamp(22px, 2.4vw, 31px); line-height: 1.72; max-width: 22em; margin: 40px 0 0; color: var(--ink); text-wrap: pretty; min-height: 3.4em }
 .hero-story .num { font-family: var(--display); font-weight: 700; font-size: 1.5em; line-height: 1; color: var(--accent); font-variant-numeric: lining-nums tabular-nums; padding: 0 .08em; letter-spacing: -.01em }
 .hero-story .mark, .chapter-story .mark { white-space: nowrap; font-weight: 700; background: linear-gradient(transparent 64%, var(--accent-soft) 64%, var(--accent-soft) 92%, transparent 92%); padding: 0 .08em }
@@ -467,7 +490,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
 .detail-disc { position: absolute; top: 6px; left: 6px; width: 128px; height: 128px; border-radius: 50%; background: radial-gradient(circle, transparent 0 30%, #100e0d 30.5% 32%, transparent 32.5%), repeating-radial-gradient(circle, #151311 0 2px, #26221f 2.5px 3px); box-shadow: 0 14px 26px -12px rgb(0 0 0 / .6); transform: translateX(66px) }
 @media (prefers-reduced-motion: no-preference) {
   #songDialog[open] .detail-disc { animation: disc-out .9s var(--ease) both .15s }
-  #songDialog[open] .detail-disc .disc-label { animation: spin 3.6s linear infinite 1s }
+  #songDialog[open] .detail-disc .disc-label { animation: spin 3.6s linear infinite; animation-play-state: paused }
+  #songDialog.is-playing .detail-disc .disc-label { animation-play-state: running }
   .detail-art.swap .detail-cover { animation: cover-swap .5s var(--ease) }
 }
 @keyframes disc-out { from { transform: translateX(0) rotate(-90deg) } to { transform: translateX(66px) rotate(0deg) } }
@@ -614,3 +638,184 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .to-top { width: 42px; height: 42px; right: 14px; bottom: calc(16px + env(safe-area-inset-bottom)) }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important } }
+
+
+/* ================= 轮换文案 ================= */
+/* 所有候选行叠在同一格里：盒子始终是最长那行的高度，切换时下方内容不跳。 */
+.rot { display: grid }
+.hero-tagline.rot { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline }
+.hero-tagline.rot::before { align-self: start; margin-top: .8em }
+.rot-stack { display: grid; min-width: 0 }
+.rot-v { grid-area: 1 / 1; visibility: hidden; opacity: 0 }
+.rot-v.is-on { visibility: visible; opacity: 1 }
+.rot-v.is-out { visibility: visible }
+.rot-c { display: inline-block; white-space: pre }
+.rot strong { color: var(--accent); font-weight: inherit }
+.closing-line.rot strong { font-weight: 700 }
+@media (prefers-reduced-motion: no-preference) {
+  .rot-v.is-in { animation: copy-line-in var(--d-4) var(--ease) both }
+  .rot-v.is-in .rot-c { animation: copy-char-in var(--d-4) var(--ease) both; animation-delay: calc(var(--ci) * var(--copy-ms) + 80ms) }
+  .rot-v.is-out { animation: copy-out var(--d-3) var(--ease-in) both }
+}
+@keyframes copy-line-in { from { filter: blur(5px) } }
+@keyframes copy-char-in { from { opacity: 0; transform: translateY(.35em) } }
+@keyframes copy-out { to { opacity: 0; transform: translateY(-.25em); filter: blur(4px) } }
+@media (max-width: 700px), (hover: none) {
+  @keyframes copy-line-in { from { opacity: .001 } to { opacity: 1 } }
+  @keyframes copy-out { to { opacity: 0; transform: translateY(-.2em) } }
+}
+.timeline-lede { margin: 6px 0 0; font-family: var(--serif); font-size: 15px; color: var(--muted); max-width: 30em }
+.empty-block p.rot, .timeline-end .end-title.rot { justify-items: center }
+.empty-block p.rot .rot-v, .timeline-end .end-title.rot .rot-v { text-align: center }
+
+/* ================= 动效增强 ================= */
+/* 按钮与图标：按下时轻压，松手弹回 */
+.button { transition: background-color var(--d-2), color var(--d-2), border-color var(--d-2), transform var(--d-3) var(--spring), box-shadow var(--d-2) }
+.button:active:not(:disabled) { transform: scale(.955); transition-duration: var(--d-1), var(--d-1), var(--d-1), .08s, var(--d-1) }
+.icon-button { transition: border-color var(--d-1), color var(--d-1), transform var(--d-3) var(--spring), background-color var(--d-1) }
+.icon-button:active:not(:disabled) { transform: scale(.88); transition-duration: var(--d-1), var(--d-1), .08s, var(--d-1) }
+.hl-dot:active i, .hl-dot:active::before { transform-origin: 50% 50% }
+
+/* 唱片：首次进入时从上方落下，弹簧收住；随后唱片滑出 */
+@media (prefers-reduced-motion: no-preference) {
+  .highlights.is-intro .hl-slide.is-active { animation: none }
+  .highlights.is-intro .hl-slide.is-active .hl-sleeve,
+  .highlights.is-intro .hl-slide.is-active .hl-mosaic { animation: drop-in var(--d-5) var(--spring) both calc(var(--stagger) * 6) }
+  .highlights.is-intro .hl-slide.is-active .hl-disc { transition-delay: 1.15s; transition-duration: var(--d-5) }
+  .highlights.is-intro .hl-slide.is-active .hl-text { animation: rise-in var(--d-4) var(--ease) both calc(var(--stagger) * 12) }
+  .highlights.is-intro .hl-art::before { animation: glow-in 2s var(--ease) both .9s, breathe 3.5s var(--ease-io) 2.9s infinite alternate }
+}
+@keyframes drop-in { from { opacity: 0; transform: translateY(-70px) rotate(-7deg) scale(.88) } 30% { opacity: 1 } }
+@keyframes glow-in { from { opacity: 0; transform: scale(.6) } }
+
+/* 封面色光晕：在唱片后方呼吸，与唱片转速同步——转一圈（7 秒）呼吸一次 */
+.hl-art::before { content: ""; position: absolute; left: 40px; top: 10px; width: 300px; height: 300px; border-radius: 50%; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--cover) 55%, transparent), transparent 72%); opacity: .55; transform: scale(.94) }
+.hl-slide:not(.is-active) .hl-art::before { opacity: 0 }
+@media (prefers-reduced-motion: no-preference) {
+  .hl-slide.is-active .hl-art::before { animation: breathe 3.5s var(--ease-io) 1s infinite alternate }
+}
+@keyframes breathe { from { opacity: .4; transform: scale(.9) } to { opacity: .85; transform: scale(1.08) } }
+@media (prefers-color-scheme: dark) { .hl-art::before { mix-blend-mode: screen } }
+
+/* 轮播拖动：跟手，松手按速度决定翻页或弹回 */
+.hl-open { translate: var(--drag, 0) 0; rotate: calc(var(--drag, 0) / 60 * 1deg) }
+.hl-stage.is-dragging .hl-open { transition: none }
+.hl-stage:not(.is-dragging) .hl-open { transition: translate var(--d-4) var(--spring), rotate var(--d-4) var(--spring) }
+.hl-stage.is-dragging { cursor: grabbing }
+
+/* 开场光指针视差（桌面）：“你的”“初”“听”三层深度不同 */
+.hero { --px: 0; --py: 0 }
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .hero-pre { translate: calc(var(--px) * 4px) calc(var(--py) * 3px) }
+  .hero-title em b:nth-child(1) { translate: calc(var(--px) * -9px) calc(var(--py) * -6px) }
+  .hero-title em b:nth-child(2) { translate: calc(var(--px) * -14px) calc(var(--py) * -9px) }
+  .hero-pre, .hero-title em b { transition: translate 1.2s var(--ease) }
+  .intro-steps li, .intro-steps li:hover { transform: perspective(900px) rotateX(calc(var(--ry, 0) * -5deg)) rotateY(calc(var(--rx, 0) * 6deg)) translateY(var(--lift, 0)) }
+  .intro-steps li:hover { --lift: -4px }
+}
+
+/* 滚动叙事（支持 scroll-driven animations 的浏览器）：景深视差、时间线脊线随滚动画出、章节进出 */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .motion .songs::before { transform-origin: 50% 0; animation: spine-draw linear both; animation-timeline: view(); animation-range: entry 0% cover 45% }
+    .motion .chapter-head .chapter-text { animation: chapter-exit linear both; animation-timeline: view(); animation-range: exit 0% exit 100% }
+  }
+  @media (min-width: 901px) and (prefers-reduced-motion: no-preference) {
+    .motion .hero::before { animation: depth-far linear both; animation-timeline: scroll(root); animation-range: 0 100vh }
+    .motion .highlights:not([hidden]) { animation: depth-near linear both; animation-timeline: scroll(root); animation-range: 0 100vh }
+    .motion .hero-tagline, .motion .hero-story { animation: depth-mid linear both; animation-timeline: scroll(root); animation-range: 0 100vh }
+  }
+}
+@keyframes spine-draw { from { transform: scaleY(0) } }
+@keyframes chapter-exit { to { opacity: .25; transform: translateY(-24px) } }
+@keyframes depth-far { to { translate: 0 140px } }
+@keyframes depth-near { to { translate: 0 -60px } }
+@keyframes depth-mid { to { translate: 0 -24px } }
+/* 不支持滚动时间线时：脊线在这一天出现时画出 */
+@supports not (animation-timeline: view()) {
+  .motion .day.reveal .songs::before { transform: scaleY(0); transform-origin: 50% 0; transition: transform var(--d-5) var(--ease) .1s }
+  .motion .day.reveal.shown .songs::before { transform: none }
+}
+
+/* 封面：随这一天出现，从微缩、模糊到清晰 */
+.motion .day.reveal .song-cover { opacity: 0; scale: .82; transition: opacity var(--d-4) var(--ease), scale var(--d-4) var(--spring-soft), transform var(--d-3) var(--spring);
+  transition-delay: calc(var(--i, 0) * var(--stagger) + 180ms), calc(var(--i, 0) * var(--stagger) + 180ms), calc(var(--i, 0) * var(--stagger) + 180ms), 0s }
+.motion .day.reveal.shown .song-cover { opacity: 1; scale: 1 }
+
+/* 弹窗：共享元素变形的时长与曲线统一到动效系统 */
+::view-transition-group(song-art) { animation-duration: var(--d-3); animation-timing-function: var(--spring-soft) }
+::view-transition-old(song-art), ::view-transition-new(song-art) { animation-duration: var(--d-2) }
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: dialog-in var(--d-3) var(--spring-soft) }
+}
+
+/* 性能：弹窗不再对整页做背景模糊（逐帧重绘整屏是开合卡顿的主因），改用不透明面板和色调遮罩 */
+dialog { background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none }
+dialog::backdrop { background: rgb(14 11 8 / .46); backdrop-filter: none; -webkit-backdrop-filter: none }
+@media (prefers-color-scheme: dark) { dialog::backdrop { background: rgb(0 0 0 / .6) } }
+
+/* 设置：歌曲来源 */
+.set-sub { font-size: 13px; font-weight: 500; color: var(--ink-2); margin: 18px 0 4px }
+.switch-row.is-fixed { cursor: default }
+.fixed-on { width: 40px; text-align: center; color: var(--accent); font-weight: 700 }
+
+/* ================= 播放器 ================= */
+.player { --pos: 0; --buf: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; margin: 4px 0 18px; padding: 12px 14px 10px 12px; border-radius: 18px; background: color-mix(in srgb, var(--bg-2) 70%, transparent); border: 1px solid var(--line) }
+.player[hidden] { display: none }
+.play-btn { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); display: grid; place-items: center; transition: transform var(--d-3) var(--spring), background-color var(--d-2) }
+.play-btn svg { width: 16px; height: 16px; grid-area: 1 / 1 }
+.play-btn .i-play path, .mini-play .i-play path { fill: currentColor; stroke: none }
+.play-btn .i-pause, .player.is-playing .play-btn .i-play { display: none }
+.player.is-playing .play-btn .i-pause { display: block }
+.play-btn:hover:not(:disabled) { transform: scale(1.06) }
+.play-btn:active:not(:disabled) { transform: scale(.92); transition-duration: .08s }
+.play-btn:disabled { background: var(--faint); cursor: default }
+.play-ring { position: absolute; inset: -4px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--accent); opacity: 0 }
+.player.is-loading .play-ring { opacity: 1; animation: spin .9s linear infinite }
+.player-main { min-width: 0 }
+.scrub { position: relative; height: 18px }
+.scrub::before, .scrub::after { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 3px; border-radius: 3px; transform-origin: 0 50% }
+.scrub::before { background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 22%, transparent) calc(var(--buf) * 100%), var(--line) 0) }
+.scrub::after { background: var(--accent); transform: scaleX(var(--pos)); transition: transform .25s linear }
+.scrub input { position: absolute; inset: 0; width: 100%; margin: 0; opacity: 0; cursor: pointer }
+.scrub input:disabled { cursor: default }
+.scrub:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px }
+.player-times { display: flex; justify-content: space-between; gap: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums }
+.player-note { font-family: var(--sans); font-size: 12.5px; color: var(--ink-2); text-align: center; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.player.is-off .player-times > span:not(.player-note) { opacity: .4 }
+.player-vol { display: flex; align-items: center; gap: 6px; color: var(--muted) }
+.player-vol[hidden] { display: none }
+.player-vol svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4 }
+.player-vol input { --vol: 1; width: 72px; height: 18px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer }
+.player-vol input::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--ink-2) calc(var(--vol) * 100%), var(--line) 0) }
+.player-vol input::-moz-range-track { height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--ink-2) calc(var(--vol) * 100%), var(--line) 0) }
+.player-vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 11px; margin-top: -4px; border-radius: 50%; background: var(--ink) }
+.player-vol input::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--ink) }
+/* 播放时：唱片转起来、再滑出一点，封面色光晕跟着轻轻起伏 */
+.detail-disc { transition: translate var(--d-4) var(--spring-soft) }
+#songDialog.is-playing .detail-disc { translate: 14px 0 }
+.detail-art::before { content: ""; position: absolute; left: 30px; top: -10px; width: 180px; height: 160px; border-radius: 50%; z-index: -1; pointer-events: none; background: radial-gradient(closest-side, color-mix(in oklab, var(--cover) 60%, transparent), transparent); opacity: 0; transition: opacity var(--d-4) var(--ease) }
+#songDialog.is-playing .detail-art::before { opacity: .6 }
+@media (prefers-reduced-motion: no-preference) {
+  #songDialog.is-playing .detail-art::before { animation: breathe 3.6s var(--ease-io) infinite alternate }
+}
+@media (prefers-reduced-motion: reduce) { #songDialog[open] .detail-disc .disc-label { animation: none } }
+
+/* 迷你播放条：关掉弹窗后继续播放 */
+.mini-player { --pos: 0; position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20; width: min(440px, calc(100% - 24px)); translate: -50% 0; display: flex; align-items: center; gap: 6px; padding: 7px 8px 7px 7px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lg); overflow: hidden }
+.mini-player[hidden] { display: none }
+.mini-player::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); transform-origin: 0 50%; transform: scaleX(var(--pos)); transition: transform .25s linear }
+@media (prefers-reduced-motion: no-preference) { .mini-player:not([hidden]) { animation: mini-in var(--d-4) var(--spring-soft) both } }
+@keyframes mini-in { from { opacity: 0; transform: translateY(24px) scale(.96) } }
+.mini-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: var(--ink); text-align: left; padding: 0; border-radius: 12px }
+.mini-cover { width: 40px; height: 40px; border-radius: 9px; overflow: hidden; flex-shrink: 0; background: var(--bg-2) }
+.mini-cover img { width: 100%; height: 100%; object-fit: cover; display: block }
+.mini-player.is-playing .mini-cover { animation: none }
+.mini-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.35 }
+.mini-text b { font-family: var(--serif); font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.mini-text small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.mini-play .i-pause, .mini-player.is-playing .mini-play .i-play { display: none }
+.mini-player.is-playing .mini-play .i-pause { display: block }
+body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
+@media (max-width: 700px) { .player { grid-template-columns: auto minmax(0, 1fr); gap: 12px } }

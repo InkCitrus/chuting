@@ -6,7 +6,7 @@ const VERSION = '__BUILD__'
 const SHELL = `chuting-shell-${VERSION}`
 const COVERS = 'chuting-covers-v1'
 const MAX_COVERS = 600
-const FILES = ['/', '/styles.css', '/app.js', '/backend.js', '/browser-store.js', '/browser-sync.js', '/archive-core.js', '/insights.js',
+const FILES = ['/', '/styles.css', '/app.js', '/backend.js', '/browser-store.js', '/browser-sync.js', '/archive-core.js', '/insights.js', '/rotator.js', '/copy.js', '/player.js',
   '/favicon.svg', '/manifest.webmanifest', '/icons/icon-192.png']
 const COVER_HOST = /^p\d{1,2}\.music\.126\.net$/
 
@@ -28,6 +28,7 @@ self.addEventListener('fetch', event => {
     if (shell) event.respondWith(networkFirst(request, shell))
     return
   }
+  // Audio (m*.music.126.net, signed and short-lived) is never intercepted or cached.
   if (COVER_HOST.test(url.hostname) && request.destination === 'image') event.respondWith(cover(event, request))
 })
 async function networkFirst(request, key) {
