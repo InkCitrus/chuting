@@ -134,6 +134,8 @@ class FakeClient:
             return {"code": 200, "allData": []}
         if method == "likelist":
             return {"code": 200, "ids": [10]}
+        if method == "song_detail":
+            return {"code": 200, "songs": [{"id": int(i), "name": "Song " + i} for i in query["ids"].split(",")]}
         if method == "music_first_listen_info":
             if self.failure:
                 raise self.failure
@@ -155,6 +157,17 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(calls, ["10", "11"])
             self.assertEqual(store.stats("1")["available"], 1)
             self.assertEqual(store.stats("1")["empty"], 1)
+
+    def test_liked_only_skips_recent_plays_and_rankings(self):
+        with tempfile.TemporaryDirectory() as d:
+            store, client = Store(d), FakeClient()
+            manager = SyncManager(store, client, delay=0)
+            manager.start(client.login(), limit=0, playlists=False, recent=False)
+            manager.thread.join(3)
+            methods = [name for name, _ in client.calls]
+            self.assertNotIn("record_recent_song", methods)
+            self.assertNotIn("user_record", methods)
+            self.assertEqual([q["id"] for name, q in client.calls if name == "music_first_listen_info"], ["10"])
 
     def test_rate_limit_stops_instead_of_looping(self):
         with tempfile.TemporaryDirectory() as d:

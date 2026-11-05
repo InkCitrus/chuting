@@ -70,7 +70,7 @@ def make_handler(app):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; frame-ancestors 'none'; base-uri 'none'")
             if filename:
                 self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
             self.end_headers()
@@ -112,8 +112,12 @@ def make_handler(app):
                         return self.send(200, "\ufeff" + output.getvalue(), "text/csv; charset=utf-8", "first-listens.csv")
                     return self.send(200, {"account": account, "kind": "first_listen", "timezone": "Asia/Shanghai", "coverage": app.store.stats(account["uid"]), "events": records}, filename="first-listens.json")
                 files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8")}
-                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js"):
+                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js", "insights.js", "rotator.js", "copy.js", "player.js"):
                     files["/" + name] = (name, "text/javascript; charset=utf-8")
+                files["/favicon.svg"] = ("favicon.svg", "image/svg+xml")
+                files["/manifest.webmanifest"] = ("manifest.webmanifest", "application/manifest+json")
+                for size in ("192", "512"):
+                    files["/icons/icon-%s.png" % size] = ("icons/icon-%s.png" % size, "image/png")
                 if url.path in files:
                     file, mime = files[url.path]
                     return self.send(200, (WEB / file).read_bytes(), mime)
@@ -149,11 +153,11 @@ def make_handler(app):
                     limit = body.get("limit", 200)
                     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 10000:
                         raise ValueError("同步数量需在 0 到 10000 之间")
-                    playlists, retry_empty = body.get("playlists", True), body.get("retry_empty", False)
-                    if not isinstance(playlists, bool) or not isinstance(retry_empty, bool):
+                    playlists, retry_empty, recent = body.get("playlists", True), body.get("retry_empty", False), body.get("recent", True)
+                    if not isinstance(playlists, bool) or not isinstance(retry_empty, bool) or not isinstance(recent, bool):
                         raise ValueError("同步选项格式不正确")
                     with app.account_lock:
-                        run_id = app.sync.start(account, limit=limit, playlists=playlists, retry_empty=retry_empty)
+                        run_id = app.sync.start(account, limit=limit, playlists=playlists, retry_empty=retry_empty, recent=recent)
                     return self.send(202, {"run_id": run_id})
                 if route == "/api/sync/pause":
                     self.account()

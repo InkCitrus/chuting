@@ -1,8 +1,24 @@
-import { validId, timestamp, mergeResult, parseFirst, archiveStatus, SOURCE } from './archive-core.js'
+import { validId, timestamp, mergeResult, parseFirst, archiveStatus, coverUrl, SOURCE } from './archive-core.js'
 const request = req => new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
 const finished = tx => new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error || new Error('本地存储失败')) })
+// Reads are served from an in-memory copy of each account's songs: status polls during a sync used to
+// clone every record (including raw responses) out of IndexedDB several times a second.
+// Writes update the copy in place; other tabs are told to drop theirs through a BroadcastChannel.
 export class BrowserStore {
-  constructor(name = 'chuting-v1') { this.name = name }
+  constructor(name = 'chuting-v1') {
+    this.name = name; this.cache = new Map(); this.version = 0
+    if (typeof BroadcastChannel === 'function') {
+      this.channel = new BroadcastChannel(`chuting-store:${name}`)
+      this.channel.unref?.()
+      this.channel.onmessage = event => { this.cache.delete(event.data?.uid); this.version++ }
+    }
+  }
+  remember(uid, songs) {
+    const rows = this.cache.get(uid)
+    if (rows) for (const song of songs) rows.set(song.id, song)
+    this.version++
+    this.channel?.postMessage({ uid })
+  }
   async open() {
     const req = indexedDB.open(this.name, 1)
     req.onupgradeneeded = () => {
@@ -40,34 +56,68 @@ export class BrowserStore {
     })
     return account
   }
-  async songs(uid) { return this.transact(['songs'], 'readonly', tx => request(tx.objectStore('songs').index('uid').getAll(uid))) }
+  async songs(uid) {
+    if (!this.cache.has(uid)) {
+      const version = this.version
+      const rows = await this.transact(['songs'], 'readonly', tx => request(tx.objectStore('songs').index('uid').getAll(uid)))
+      // A write that landed while reading means this snapshot may be stale: use it once, do not keep it.
+      if (version !== this.version) return rows
+      this.cache.set(uid, new Map(rows.map(row => [row.id, row])))
+    }
+    return [...this.cache.get(uid).values()]
+  }
   async candidates(uid, songs, source) {
-    return this.transact(['songs'], 'readwrite', async tx => {
+    const written = []
+    await this.transact(['songs'], 'readwrite', async tx => {
       const table = tx.objectStore('songs')
       for (const item of songs) {
         if (!item || !validId(item.id)) continue
         const id = String(item.id), old = await request(table.get([uid, id]))
         const merged = old || { uid, id, name: '', artists: '', album: '', status: 'pending', attempts: 0, observations: [], sources: [] }
         for (const k of ['name', 'artists', 'album']) if (item[k]) merged[k] = String(item[k])
-        merged.sources = [...new Set([...merged.sources, source])]
-        table.put(merged)
+        const cover = coverUrl(item.cover)
+        if (cover) merged.cover = cover
+        if (source) merged.sources = [...new Set([...merged.sources, source])]
+        if (Number.isInteger(item.like_rank)) merged.like_rank = item.like_rank
+        table.put(merged); written.push(merged)
       }
     })
+    this.remember(uid, written)
+  }
+  // Album art backfill: `found` maps id -> cover URL; every id in `checked` is marked so it is not asked again soon.
+  async covers(uid, found, checked) {
+    const written = []
+    await this.transact(['songs'], 'readwrite', async tx => {
+      const table = tx.objectStore('songs')
+      for (const id of checked) {
+        const song = await request(table.get([uid, String(id)]))
+        if (!song) continue
+        const cover = coverUrl(found.get(String(id)))
+        if (cover) song.cover = cover
+        song.cover_checked_ms = Date.now()
+        table.put(song); written.push(song)
+      }
+    })
+    this.remember(uid, written)
   }
   async result(uid, id, body) {
     const parsed = parseFirst(body, id)
+    let merged
     await this.transact(['songs'], 'readwrite', async tx => {
       const table = tx.objectStore('songs'), song = await request(table.get([uid, id]))
       if (!song) throw new Error('候选歌曲不存在')
-      table.put(mergeResult(song, parsed, body))
+      table.put(merged = mergeResult(song, parsed, body))
     })
+    this.remember(uid, [merged])
     return parsed ? 'found' : 'empty'
   }
   async failure(uid, id, error) {
+    let row
     await this.transact(['songs'], 'readwrite', async tx => {
       const table = tx.objectStore('songs'), song = await request(table.get([uid, id]))
-      if (song) table.put({ ...song, status: song.first_listen_ms ? song.status : 'failed', attempts: (song.attempts || 0) + 1, last_attempt_ms: Date.now(), error: String(error).slice(0, 200) })
+      if (song) table.put(row = { ...song, status: song.first_listen_ms ? song.status : 'failed', attempts: (song.attempts || 0) + 1, last_attempt_ms: Date.now(), error: String(error).slice(0, 200) })
     })
+    if (row) this.remember(uid, [row])
   }
   async status(account) {
     const data = account ? archiveStatus(await this.songs(account.uid)) : { stats: {}, calendar: { months: [], days: 0 } }
@@ -92,6 +142,9 @@ export class BrowserStore {
         sources: [...new Set((complete ? row.sources || [] : ['导入档案']).map(String))], attempts: Math.max(0, Number(row.attempts) || 0),
         status: ['pending', 'empty', 'failed', 'available', 'conflict'].includes(row.status) ? row.status : 'pending',
         last_attempt_ms: Number(row.last_attempt_ms) || null, play_count: row.play_count ?? null, observations: [] }
+      const cover = coverUrl(row.cover)
+      if (cover) song.cover = cover
+      for (const k of ['peak_count', 'peak_ms']) if (Number.isSafeInteger(row[k]) && row[k] > 0) song[k] = row[k]
       if (row.first_listen_ms) {
         song.first_listen_ms = timestamp(row.first_listen_ms)
         song.captured_ms = Number(row.captured_ms) || Date.now()
@@ -122,7 +175,7 @@ export class BrowserStore {
             song.first_listen_ms = old.first_listen_ms
             song.captured_ms = old.captured_ms
           }
-          for (const k of ['name', 'artists', 'album']) if (!song[k]) song[k] = old[k]
+          for (const k of ['name', 'artists', 'album', 'cover', 'cover_checked_ms', 'peak_count', 'peak_ms', 'raw']) if (!song[k] && old[k]) song[k] = old[k]
           if (song.first_listen_ms) song.status = song.observations.length > 1 ? 'conflict' : 'available'
         }
         songs.put(song)
@@ -135,6 +188,7 @@ export class BrowserStore {
       accounts.put({ ...old, uid, account: { uid, nickname: String(account.nickname || uid) }, checkpoints })
       tx.objectStore('settings').put({ key: 'active', value: uid })
     })
+    this.cache.delete(uid); this.version++; this.channel?.postMessage({ uid })
     return { uid, nickname: String(account.nickname || uid) }
   }
 }

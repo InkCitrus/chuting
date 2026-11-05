@@ -4,7 +4,7 @@ import { seal, unseal, getSession, sessionCookie } from './session.mjs'
 
 export const securityHeaders = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; media-src 'self' https://*.music.126.net; connect-src 'self' https://*.music.126.net; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 }
 function json(body, status = 200, extra = {}) { return Response.json(body, { status, headers: { ...securityHeaders, 'Cache-Control': 'no-store', ...extra } }) }
 async function input(request) {
@@ -20,6 +20,28 @@ async function input(request) {
   }
   try { const body = JSON.parse(Buffer.concat(chunks).toString()); if (!body || Array.isArray(body) || typeof body !== 'object') throw 0; return body }
   catch { throw new ApiError('JSON 格式错误', 400) }
+}
+export function briefSong(song) {
+  return { id: song.id, name: song.name, ar: (song.ar || []).map(a => ({ name: a.name })), al: { name: song.al?.name || '', picUrl: song.al?.picUrl || '' } }
+}
+// Audio comes straight from NetEase's CDN (m701/m801…music.126.net). URLs are signed and expire in minutes,
+// so they are handed to the page as-is (upgraded to https) and never cached anywhere.
+const AUDIO_HOST = /^([a-z0-9-]+\.)*music\.126\.net$/
+export function audioUrl(value) {
+  try {
+    const url = new URL(String(value || ''))
+    if (!['http:', 'https:'].includes(url.protocol) || !AUDIO_HOST.test(url.hostname)) return null
+    url.protocol = 'https:'
+    return url.toString()
+  } catch { return null }
+}
+export function playable(body, id) {
+  const item = (body?.data || []).find(x => String(x.id) === String(id)) || body?.data?.[0] || {}
+  const url = audioUrl(item.url)
+  if (!url) return { id: String(id), url: null, reason: [1, 4].includes(item.fee) ? 'rights' : 'unavailable' }
+  // freeTrialInfo is only set when this account lacks the rights: the URL is then a preview clip.
+  const trial = item.freeTrialInfo ? { start: Number(item.freeTrialInfo.start) || 0, end: Number(item.freeTrialInfo.end) || 0 } : null
+  return { id: String(id), url, type: String(item.type || '').toLowerCase(), br: Number(item.br) || 0, duration: Number(item.time) || 0, level: item.level || '', trial }
 }
 // Dependency injection is used by tests, never controlled by HTTP input.
 export async function handleApi(request, env, upstream = callNetease) {
@@ -53,8 +75,10 @@ export async function handleApi(request, env, upstream = callNetease) {
     }
     if (url.pathname === '/api/auth/logout') return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) })
     const session = await getSession(request, env.SESSION_SECRET)
-    if (!session?.account || !session.cookie?.MUSIC_U) throw new ApiError('请先扫码连接网易云音乐', 401)
-    if (url.pathname === '/api/auth/status') return json({ account: session.account })
+    const valid = Boolean(session?.account && session.cookie?.MUSIC_U)
+    // A status probe without a session is a normal answer, not an error (avoids a 401 in every visitor's console).
+    if (url.pathname === '/api/auth/status') return json({ account: valid ? session.account : null })
+    if (!valid) throw new ApiError('请先扫码连接网易云音乐', 401)
     if (url.pathname !== '/api/netease') return json({ error: '接口不存在' }, 404)
     if (String(body.uid) !== session.account.uid) throw new ApiError('登录账号已改变，请暂停后重新连接', 401)
     // Only collector methods are public. QR exchange is handled above.
@@ -64,6 +88,17 @@ export async function handleApi(request, env, upstream = callNetease) {
       const p = result.body.profile
       if (!p?.userId || String(p.userId) !== session.account.uid) throw new ApiError('登录账号已改变，请重新连接', 401)
       return json({ account: { uid: String(p.userId), nickname: String(p.nickname || p.userId) } })
+    }
+    // Song details are only used for names and album art: trim ~1–2 KB per song down to what is stored.
+    if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })
+    if (body.method === 'song_url') {
+      let answer = playable(result.body, body.query?.id)
+      // Some tracks have no high-bitrate file: ask once more at standard quality.
+      if ((!answer.url || answer.trial) && body.query?.level !== 'standard') {
+        const again = playable((await upstream('song_url', { ...body.query, level: 'standard' }, session.cookie, session.account.uid)).body, body.query?.id)
+        if (again.url && (!again.trial || !answer.url)) answer = again
+      }
+      return json(answer)
     }
     // Upstream payload is returned only to this authenticated browser; never cached/logged.
     return json(result.body)

@@ -43,6 +43,17 @@ test('proxy rejects cross origin, no session, account mismatch and arbitrary rou
   assert.throws(() => endpoint('song_detail', { ids: '1);DROP TABLE' }), /格式/)
   assert.equal(endpoint('user_playlist', { uid: 'ATTACKER' }, '1')[1].uid, '1')
 })
+test('session status probe answers without a session instead of failing', async () => {
+  const env = { SESSION_SECRET: secret }, rpc = async () => assert.fail('status must not call upstream')
+  const anonymous = await handleApi(req('/api/auth/status'), env, rpc)
+  assert.equal(anonymous.status, 200)
+  assert.deepEqual(await anonymous.json(), { account: null })
+  const token = await seal({ account: { uid: '1', nickname: 'Test' }, cookie: { MUSIC_U: 'fake' } }, secret, 'session', 60)
+  assert.deepEqual(await (await handleApi(req('/api/auth/status', {}, 'chuting_session=' + token), env, rpc)).json(), { account: { uid: '1', nickname: 'Test' } })
+  const noCookie = await seal({ account: { uid: '1' }, cookie: {} }, secret, 'session', 60)
+  assert.deepEqual(await (await handleApi(req('/api/auth/status', {}, 'chuting_session=' + noCookie), env, rpc)).json(), { account: null })
+  assert.equal((await handleApi(req('/api/auth/status', {}, null, 'https://other.example'), env, rpc)).status, 403)
+})
 test('QR login returns only account and an encrypted HttpOnly credential', async () => {
   const rpc = async method => method === 'qr_key' ? { body: { unikey: 'qr-fixture' } }
     : method === 'qr_check' ? { body: { code: 803 }, cookie: { MUSIC_U: 'sensitive-fixture' } }
@@ -58,6 +69,22 @@ test('QR login returns only account and an encrypted HttpOnly credential', async
 test('transport maps HTTP rate limit and does not expose upstream error', async () => {
   await assert.rejects(callNetease('music_first_listen_info', { id: '1' }, {}, '1', async () => Response.json({ code: 429, message: 'credential-secret' }, { status: 429 })), err => err instanceof ApiError && err.code === 429 && !err.message.includes('secret'))
 })
+test('NetEase risk-control codes are treated as rate limits', async () => {
+  await assert.rejects(callNetease('music_first_listen_info', { id: '1' }, {}, '1', async () => Response.json({ code: -460, message: 'Cheating' })), err => err.code === 429)
+})
+test('song details are trimmed to names and album art before reaching the browser', async () => {
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'fake' } }, secret, 'session', 60)
+  const rpc = async () => ({ body: { code: 200, songs: [{ id: 7, name: 'n', ar: [{ name: 'a', id: 9, alias: [] }], al: { name: 'al', picUrl: 'http://p1.music.126.net/x/1.jpg', pic: 1 }, privilege: { big: 'x' }, mv: 0 }], privileges: [{}] }, cookie: {} })
+  const body = await (await handleApi(req('/api/netease', { uid: '1', method: 'song_detail', query: { ids: '7' } }, 'chuting_session=' + token), env, rpc)).json()
+  assert.deepEqual(body, { code: 200, songs: [{ id: 7, name: 'n', ar: [{ name: 'a' }], al: { name: 'al', picUrl: 'http://p1.music.126.net/x/1.jpg' } }] })
+})
+test('CSP allows album art only from the NetEase image CDN', async () => {
+  const response = await handleApi(new Request(origin + '/api/runtime'), {})
+  const csp = response.headers.get('Content-Security-Policy')
+  assert.match(csp, /img-src 'self' data: https:\/\/\*\.music\.126\.net;/)
+  assert.match(csp, /script-src 'self';/)
+})
 test('transport uses Workers-compatible manual redirects and only fixed official hosts', async () => {
   await callNetease('qr_key', {}, {}, null, async (url, options) => {
     assert.equal(new URL(url).hostname, 'interfacepc.music.163.com')
@@ -67,4 +94,38 @@ test('transport uses Workers-compatible manual redirects and only fixed official
     assert.equal(decoded.data.type, 3)
     return Response.json({ code: 200, unikey: 'fixture' })
   })
+})
+test('player: the session is forwarded, the URL comes back over https from the audio CDN only', async () => {
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'vip-session', __csrf: 'c' } }, secret, 'session', 60)
+  const ask = (rpc, query = { id: '7' }) => handleApi(req('/api/netease', { uid: '1', method: 'song_url', query }, 'chuting_session=' + token), env, rpc).then(r => r.json())
+  // Full track for a VIP account at exhigh.
+  let seen = []
+  let body = await ask(async (method, query, cookie) => { seen.push([method, query.level, cookie.MUSIC_U]); return { body: { code: 200, data: [{ id: 7, url: 'http://m701.music.126.net/2026/a.mp3?vuutv=x', br: 320000, type: 'MP3', time: 241000, fee: 1, level: 'exhigh', freeTrialInfo: null }] }, cookie: {} } })
+  assert.deepEqual(seen, [['song_url', undefined, 'vip-session']])
+  assert.deepEqual(body, { id: '7', url: 'https://m701.music.126.net/2026/a.mp3?vuutv=x', type: 'mp3', br: 320000, duration: 241000, level: 'exhigh', trial: null })
+  // No file at the high level: falls back to standard once.
+  seen = []
+  body = await ask(async (method, query) => { seen.push(query.level); return { body: { code: 200, data: [query.level === 'standard' ? { id: 7, url: 'https://m801.music.126.net/b.mp3', fee: 0, freeTrialInfo: null } : { id: 7, url: null, fee: 0 }] }, cookie: {} } })
+  assert.deepEqual(seen, [undefined, 'standard'])
+  assert.equal(body.url, 'https://m801.music.126.net/b.mp3')
+  // Account without the rights: a preview clip is flagged as a trial, not passed off as the full track.
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://m701.music.126.net/clip.mp3', fee: 1, freeTrialInfo: { start: 30, end: 60 } }] }, cookie: {} }))
+  assert.deepEqual(body.trial, { start: 30, end: 60 })
+  // Nothing playable, or a host outside the NetEase CDN: no URL, a reason the page can phrase.
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: null, fee: 4 }] }, cookie: {} }))
+  assert.deepEqual(body, { id: '7', url: null, reason: 'rights' })
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'https://evil.example/a.mp3', fee: 0 }] }, cookie: {} }))
+  assert.equal(body.url, null); assert.equal(body.reason, 'unavailable')
+})
+test('player endpoint asks NetEase for one song at a bounded quality level', () => {
+  const [path, data] = endpoint('song_url', { id: '7', level: 'lossless' })
+  assert.equal(path, '/api/song/enhance/player/url/v1')
+  assert.deepEqual(data, { ids: '[7]', level: 'exhigh', encodeType: 'flac' })
+  assert.equal(endpoint('song_url', { id: '7', level: 'standard' })[1].level, 'standard')
+  assert.throws(() => endpoint('song_url', { id: '7;drop' }))
+})
+test('CSP lets audio play only from the NetEase CDN', async () => {
+  const csp = (await handleApi(new Request(origin + '/api/runtime'), {})).headers.get('Content-Security-Policy')
+  assert.match(csp, /media-src 'self' https:\/\/\*\.music\.126\.net;/)
 })

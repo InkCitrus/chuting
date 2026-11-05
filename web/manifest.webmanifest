@@ -1,0 +1,15 @@
+{
+  "name": "初听 · 每首歌第一次响起的那天",
+  "short_name": "初听",
+  "description": "把网易云音乐里每首歌第一次听见的时间，排成一条可以慢慢翻看的时间线。档案只保存在你的浏览器里，断网也能翻看。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f2ec",
+  "theme_color": "#f5f2ec",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

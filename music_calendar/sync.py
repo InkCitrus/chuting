@@ -18,14 +18,14 @@ class SyncManager:
         self.uid = None
         self.store.recover_runs()
 
-    def start(self, account, limit=200, playlists=True, retry_empty=False):
+    def start(self, account, limit=200, playlists=True, retry_empty=False, recent=True):
         with self.lock:
             if self.thread and self.thread.is_alive():
                 raise ValueError("已经有一个同步任务在进行")
             self.stop.clear()
             self.uid = account["uid"]
             run_id = self.store.new_run(self.uid)
-            self.thread = threading.Thread(target=self.run, args=(account, run_id, limit, playlists, retry_empty), daemon=True)
+            self.thread = threading.Thread(target=self.run, args=(account, run_id, limit, playlists, retry_empty, recent), daemon=True)
             self.thread.start()
             return run_id
 
@@ -43,7 +43,7 @@ class SyncManager:
                 if attempt == 2 or err.code not in (0, 408, 500, 502, 503, 504):
                     raise
 
-    def discover(self, uid, run_id, playlists):
+    def discover(self, uid, run_id, playlists, recent=True):
         warnings = []
         sources = [
             ("最近播放", "record_recent_song", {"limit": 1000}, lambda b: [song_metadata(x["data"]) for x in b.get("data", {}).get("list", [])]),
@@ -51,6 +51,8 @@ class SyncManager:
             ("本周排行", "user_record", {"uid": uid, "type": 1}, lambda b: [song_metadata(x["song"]) for x in b.get("weekData", [])]),
             ("喜欢的歌曲", "likelist", {"uid": uid}, lambda b: [{"id": str(i)} for i in b.get("ids", [])]),
         ]
+        if not recent:  # liked songs only (the web app's default)
+            sources = sources[3:]
         for label, method, query, extract in sources:
             self.store.update_run(run_id, phase="查找歌曲 · " + label)
             try:
@@ -94,14 +96,14 @@ class SyncManager:
                     break
         return warnings
 
-    def run(self, account, run_id, limit, playlists, retry_empty):
+    def run(self, account, run_id, limit, playlists, retry_empty, recent=True):
         uid = account["uid"]
         counts = {"queried": 0, "found": 0, "empty": 0, "failed": 0}
         try:
             current = self.client.login()
             if current["uid"] != uid:
                 raise ApiError("登录的账号已切换，请重新连接后再同步")
-            warnings = self.discover(uid, run_id, playlists)
+            warnings = self.discover(uid, run_id, playlists, recent)
             queue = self.store.pending(uid, retry_empty=retry_empty, limit=limit or 1000000)
             consecutive_errors = 0
             for index, song in enumerate(queue):
