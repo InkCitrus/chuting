@@ -27,7 +27,7 @@ class Application:
     def connect(self):
         with self.account_lock:
             if self.sync.thread and self.sync.thread.is_alive():
-                raise ValueError("请先暂停当前采集，再重新连接账号")
+                raise ValueError("正在同步，请先暂停再重新连接账号")
             self.client.close()
             account = self.client.login()
             self.store.account(account["uid"], account["nickname"])
@@ -78,12 +78,12 @@ def make_handler(app):
 
         def account(self):
             if not app.account:
-                raise ApiError("请先连接网易云账号", 401)
+                raise ApiError("请先连接网易云音乐账号", 401)
             return app.account
 
         def do_GET(self):
             if not self.allowed_host():
-                return self.send(403, {"error": "仅支持本机访问"})
+                return self.send(403, {"error": "只能在本机访问"})
             url = urlsplit(self.path)
             query = parse_qs(url.query)
             try:
@@ -93,7 +93,7 @@ def make_handler(app):
                     account = self.account()
                     month = query.get("month", [None])[0]
                     if month and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
-                        raise ValueError("月份格式应为 YYYY-MM")
+                        raise ValueError("月份格式应为 YYYY-MM，例如 2026-11")
                     term = query.get("q", [""])[0][:200]
                     records = app.store.events(account["uid"], month=month, query=term, limit=1000000)
                     if url.path == "/api/events":
@@ -113,30 +113,30 @@ def make_handler(app):
                 if url.path in files:
                     file, mime = files[url.path]
                     return self.send(200, (WEB / file).read_bytes(), mime)
-                return self.send(404, {"error": "页面不存在"})
+                return self.send(404, {"error": "找不到这个页面"})
             except ApiError as err:
                 return self.send(401, {"error": str(err)})
             except ValueError as err:
                 return self.send(400, {"error": str(err)})
             except (OSError, OverflowError):
-                return self.send(500, {"error": "读取失败，请检查本机存储"})
+                return self.send(500, {"error": "读取本地数据失败，请检查磁盘空间和文件权限"})
 
         def do_POST(self):
             if not self.allowed_host():
-                return self.send(403, {"error": "仅支持本机访问"})
+                return self.send(403, {"error": "只能在本机访问"})
             origin = self.headers.get("Origin")
             allowed = {"http://127.0.0.1:%s" % self.server.server_port, "http://localhost:%s" % self.server.server_port}
             if origin and origin not in allowed:
-                return self.send(403, {"error": "请求来源不被允许"})
+                return self.send(403, {"error": "不接受来自其他网站的请求"})
             if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
-                return self.send(415, {"error": "需要 JSON 请求"})
+                return self.send(415, {"error": "请求需使用 JSON 格式"})
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 if not 0 <= length <= 8192:
-                    raise ValueError("请求过大")
+                    raise ValueError("请求内容过大")
                 body = json.loads(self.rfile.read(length) or b"{}")
                 if not isinstance(body, dict):
-                    raise ValueError("请求格式错误")
+                    raise ValueError("请求内容格式不正确")
                 route = urlsplit(self.path).path
                 if route == "/api/connect":
                     return self.send(200, {"account": app.connect()})
@@ -144,10 +144,10 @@ def make_handler(app):
                     account = self.account()
                     limit = body.get("limit", 200)
                     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 10000:
-                        raise ValueError("采集数量无效")
+                        raise ValueError("同步数量需在 0 到 10000 之间")
                     playlists, retry_empty = body.get("playlists", True), body.get("retry_empty", False)
                     if not isinstance(playlists, bool) or not isinstance(retry_empty, bool):
-                        raise ValueError("采集选项无效")
+                        raise ValueError("同步选项格式不正确")
                     with app.account_lock:
                         run_id = app.sync.start(account, limit=limit, playlists=playlists, retry_empty=retry_empty)
                     return self.send(202, {"run_id": run_id})
@@ -155,13 +155,13 @@ def make_handler(app):
                     self.account()
                     app.sync.cancel()
                     return self.send(202, {"status": "pausing"})
-                return self.send(404, {"error": "操作不存在"})
+                return self.send(404, {"error": "不支持这个操作"})
             except ApiError as err:
                 return self.send(401 if err.code in (301, 401) else 502, {"error": str(err)})
             except (ValueError, TypeError) as err:
                 return self.send(400, {"error": str(err)})
             except OSError:
-                return self.send(500, {"error": "保存失败，请检查本机存储"})
+                return self.send(500, {"error": "保存失败，请检查磁盘空间和文件权限"})
 
     return Handler
 
@@ -170,7 +170,7 @@ def serve(directory, port=8767):
     app = Application(directory)
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app))
     server.daemon_threads = True
-    print("音乐收听日历 · http://127.0.0.1:%s" % server.server_port, flush=True)
+    print("初听已启动：http://127.0.0.1:%s （按 Ctrl+C 停止）" % server.server_port, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

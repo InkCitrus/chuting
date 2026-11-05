@@ -56,23 +56,23 @@ class NeteaseClient:
                 self.process.stdin.flush()
                 if not select.select([self.process.stdout], [], [], 25)[0]:
                     self.close()
-                    raise ApiError("接口请求超时，可以稍后重试")
+                    raise ApiError("网易云接口响应超时，请稍后重试")
                 result = json.loads(self.process.stdout.readline())
             except (OSError, ValueError):
                 self.close()
-                raise ApiError("接口连接中断，可以稍后重试")
-            errors = {"DEPENDENCY_MISSING": "请先运行 npm install --ignore-scripts 安装接口依赖",
-                      "LOGIN_MISSING": "未找到网易云登录态，请登录 macOS 客户端，或设置 NETEASE_COOKIE 环境变量",
-                      "UPSTREAM_ERROR": "网易接口暂时不可用，请稍后重试"}
+                raise ApiError("与网易云接口的连接中断了，请稍后重试")
+            errors = {"DEPENDENCY_MISSING": "缺少接口依赖，请先在项目目录运行 npm ci --ignore-scripts",
+                      "LOGIN_MISSING": "没有找到网易云音乐的登录状态。请先在 macOS 客户端登录，或设置 NETEASE_COOKIE 环境变量",
+                      "UPSTREAM_ERROR": "网易云接口暂时不可用，请稍后重试"}
             if "error" in result:
-                raise ApiError(errors.get(result["error"], "接口请求失败"), result.get("code", 0))
+                raise ApiError(errors.get(result["error"], "请求网易云接口失败"), result.get("code", 0))
             body = result["body"]
             if body.get("code") != 200:
-                raise ApiError("网易接口返回异常状态 " + str(body.get("code")), body.get("code", 0))
+                raise ApiError("网易云接口返回了异常状态码 " + str(body.get("code")), body.get("code", 0))
             return body
 
     def login(self):
         account = self.call("login_status").get("account")
         if not account:
-            raise ApiError("登录态已失效，请重新登录网易云音乐", 301)
+            raise ApiError("登录已过期，请在网易云音乐客户端重新登录", 301)
         return account
