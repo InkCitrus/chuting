@@ -135,6 +135,7 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 .kicker { font-size: 13px; letter-spacing: .18em; font-weight: 500; color: var(--accent); margin: 0 0 14px }
 
 main { max-width: var(--wide); margin: auto; padding: 0 40px }
+@media (max-width: 1100px) { main { overflow-x: clip } } /* 光晕不撑宽手机视口 */
 
 /* ---------- 开场 ---------- */
 .hero { --cover: var(--accent); min-height: calc(100vh - var(--bar)); min-height: calc(100svh - var(--bar)); padding: 8vh 0 64px; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 48px; position: relative; transition: --cover 1.2s ease }
