@@ -27,6 +27,18 @@ export function hardAnswer(answer) {
   if (HARD_LEVELS.has(String(answer.level || '').toLowerCase())) return true
   return Number(answer.br) > 320000 && Boolean(type) && !LOSSY_TYPES.has(type)
 }
+// NetEase serves each file from one storage zone, reachable as m7 or m701 (m8 or m801, …). The wrong
+// one answers 400 OperationZoneMismatch. The host NetEase gave is tried first, its twin only after a media error.
+export function audioHosts(url) {
+  try {
+    const first = new URL(url)
+    const m = first.hostname.match(/^m(\d+?)(01)?\.music\.126\.net$/)
+    if (!m) return [url]
+    const twin = new URL(url)
+    twin.hostname = `m${m[1]}${m[2] ? '' : '01'}.music.126.net`
+    return [url, twin.toString()]
+  } catch { return [url] }
+}
 export function playErrorMessage(err, _mediaError, answer) {
   if (err?.name === 'NotAllowedError') return ''
   if (err?.name === 'AbortError') return null
@@ -40,7 +52,7 @@ export function playErrorMessage(err, _mediaError, answer) {
 export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
   const audio = new Audio()
   audio.preload = 'auto'
-  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, offline: false, seeking: false, gen: 0, gain: 1, userVolume: 1, pendingFade: 0 }
+  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, offline: false, seeking: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0 }
   let fadeRaf = 0
   let mediaEpoch = 0
   let recovery = null
@@ -203,6 +215,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     mini.title.textContent = event.name; mini.artist.textContent = event.artists || ''
     mini.cover.replaceChildren(); const art = coverFor(event); if (art) { const img = new Image(); img.alt = ''; img.decoding = 'async'; img.src = art(96); mini.cover.append(img) }
     render(); session()
+    let firstSrc = ''
     try {
       const answer = await requestUrl(event, fallback, gen)
       if (gen !== state.gen) return stale()
@@ -213,8 +226,10 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       }
       // Skip FLAC / hi-res even when canPlayType says yes: 24-bit files and mislabeled 403s both surface as code 4.
       if (!state.retried && hardAnswer(answer)) return settle(gen, { name: 'Error' })
+      state.hosts = audioHosts(answer.url); state.hostIndex = 0
       mediaEpoch++
-      audio.src = answer.url
+      audio.src = state.hosts[0]
+      firstSrc = audio.src
       seekWhenReady(at)
       if (state.pendingFade) { applyGain(0); audio.muted = true }
       if (autoplay) await audio.play()
@@ -234,6 +249,8 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       }
       if (gen !== state.gen) return recovery || stale()
       if (err?.name === 'AbortError') return recovery || status()
+      if (state.answer?.url && audio.src !== firstSrc) return recovery || status()
+      if (state.answer?.url) { const job = nextHost(gen); if (job) return job }
       return settle(gen, err)
     }
     if (gen !== state.gen) return stale()
@@ -250,7 +267,28 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     })
     else audio.pause()
   }
-  // A decode / host failure asks for a lower level once. Errors from an older src are ignored,
+  // Same file on the other storage edge, from where it stopped. Returns null when there is none left.
+  function nextHost(gen) {
+    if (gen !== state.gen || state.hostIndex >= state.hosts.length - 1) return null
+    state.hostIndex++
+    const at = Number.isFinite(audio.currentTime) && audio.currentTime > 0 ? audio.currentTime : 0
+    mediaEpoch++
+    audio.src = state.hosts[state.hostIndex]
+    const src = audio.src
+    seekWhenReady(at)
+    const job = audio.play().then(() => {
+      if (gen !== state.gen) return stale()
+      state.loading = false; audio.muted = false; applyGain(1); render()
+    }).catch(err => {
+      if (gen !== state.gen) return stale()
+      if (err?.name === 'NotAllowedError') { state.loading = false; render(); return status() }
+      if (err?.name === 'AbortError' || audio.src !== src) return recovery || status()
+      return settle(gen, err)
+    })
+    recovery = job
+    return job
+  }
+  // A host failure tries the twin edge first; a decode failure then asks for a lower level once. Errors from an older src are ignored,
   // so a slow song cannot stamp an error onto the one the listener just opened.
   audio.addEventListener('error', () => {
     const epoch = mediaEpoch
@@ -260,7 +298,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       if (epoch !== mediaEpoch || gen !== state.gen) return
       if (!src || audio.src !== src) return
       if (!state.event || !state.answer?.url) return
-      settle(gen, { name: 'Error' })
+      nextHost(gen) || settle(gen, { name: 'Error' })
     })
   })
   for (const type of ['play', 'pause', 'timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'waiting', 'playing']) audio.addEventListener(type, () => {

@@ -36,13 +36,12 @@ function briefSong(song) {
 // Audio comes straight from NetEase's CDN (m701/m801…music.126.net). URLs are signed and expire in minutes,
 // so they are handed to the page as-is (upgraded to https) and never cached anywhere.
 const AUDIO_HOST = /^([a-z0-9-]+\.)*(music|vod)\.126\.net$/
-// Older HTTP-only edges (m7/m8) fail after a blanket https: upgrade; their m701/m801 twins serve the same files.
-const AUDIO_HOST_REWRITE = { 'm7.music.126.net': 'm701.music.126.net', 'm8.music.126.net': 'm801.music.126.net' }
+// Keep the host NetEase gave. Each file lives in one storage zone: m7 and m701 (or m8 and m801) are not
+// interchangeable, and the wrong edge answers 400 OperationZoneMismatch. All of them serve valid https.
 export function audioUrl(value) {
   try {
     const url = new URL(String(value || ''))
     if (!['http:', 'https:'].includes(url.protocol) || !AUDIO_HOST.test(url.hostname)) return null
-    if (AUDIO_HOST_REWRITE[url.hostname]) url.hostname = AUDIO_HOST_REWRITE[url.hostname]
     url.protocol = 'https:'
     return url.toString()
   } catch { return null }
@@ -131,6 +130,14 @@ export async function handleApi(request, env, upstream = callNetease) {
           const lossy = again.url && !hardAudio(again)
           if (lossy && (!again.trial || !answer.url || hardAudio(answer))) answer = again
           else if (!answer.url && again.url) answer = again
+        } catch {}
+      }
+      // Some songs answer the v1 standard ask with their lossless master anyway. The older endpoint
+      // takes a bitrate cap instead of a level and returns a 128k MP3 for them.
+      if (answer.url && hardAudio(answer)) {
+        try {
+          const legacy = playable((await upstream('song_url_legacy', { id: body.query?.id }, session.cookie, session.account.uid)).body, body.query?.id)
+          if (legacy.url && !hardAudio(legacy) && (!legacy.trial || answer.trial)) answer = legacy
         } catch {}
       }
       return json(answer)
