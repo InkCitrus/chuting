@@ -117,9 +117,11 @@ test('player: the session is forwarded, the URL comes back over https from the a
   assert.deepEqual(body, { id: '7', url: null, reason: 'rights' })
   body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'https://evil.example/a.mp3', fee: 0 }] }, cookie: {} }))
   assert.equal(body.url, null); assert.equal(body.reason, 'unavailable')
-  // HTTP-only m8/m7 edges are rewritten to the HTTPS twins; official VOD hosts are allowed through.
+  // The host is kept (m7 and m701 are different storage zones); only the scheme is upgraded.
   body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://m8.music.126.net/a.mp3', br: 128000, type: 'mp3', time: 1000, fee: 0 }] }, cookie: {} }))
-  assert.equal(body.url, 'https://m801.music.126.net/a.mp3')
+  assert.equal(body.url, 'https://m8.music.126.net/a.mp3')
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://m7.music.126.net/20261108/ymusic/a.mp3?vuutv=x', br: 128000, type: 'mp3', time: 1000, fee: 0 }] }, cookie: {} }))
+  assert.equal(body.url, 'https://m7.music.126.net/20261108/ymusic/a.mp3?vuutv=x')
   body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://vodkgeyttp9.vod.126.net/obj/a.mp3', br: 128000, type: 'mp3', time: 1000, fee: 0 }] }, cookie: {} }))
   assert.equal(body.url, 'https://vodkgeyttp9.vod.126.net/obj/a.mp3')
   // If the standard-quality retry throws, keep the first answer (rights / trial) instead of 500.
@@ -138,13 +140,22 @@ test('player: the session is forwarded, the URL comes back over https from the a
   assert.deepEqual(levels, ['first', 'standard'])
   assert.equal(body.type, 'mp3')
   assert.equal(body.url, 'https://m801.music.126.net/std.mp3')
-  // Still FLAC at the lower level: stop. A third request would loop.
+  // Still lossless at standard: one ask on the bitrate-capped legacy endpoint, and its MP3 wins.
+  let methods = []
+  body = await ask(async (method) => {
+    methods.push(method)
+    if (method === 'song_url_legacy') return { body: { code: 200, data: [{ id: 7, url: 'http://m7.music.126.net/legacy.mp3', br: 128000, type: 'mp3', time: 368000, fee: 0 }] }, cookie: {} }
+    return { body: { code: 200, data: [{ id: 7, url: 'https://m701.music.126.net/sq.m4a', br: 988000, type: 'm4a', time: 368000, fee: 0, level: 'lossless' }] }, cookie: {} }
+  })
+  assert.deepEqual(methods, ['song_url', 'song_url', 'song_url_legacy'])
+  assert.equal(body.url, 'https://m7.music.126.net/legacy.mp3')
+  // Lossless everywhere: stop after the legacy ask. A fourth request would loop.
   let calls = 0
   body = await ask(async () => {
     calls++
     return { body: { code: 200, data: [{ id: 7, url: 'https://m701.music.126.net/sq.flac', br: 983061, type: 'flac', time: 368000, fee: 0, level: 'lossless' }] }, cookie: {} }
   })
-  assert.equal(calls, 2)
+  assert.equal(calls, 3)
   assert.equal(body.type, 'flac')
   // No URL, and the privilege says the track cannot be listened to: copyright, not a format error.
   body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: null, fee: 0, code: 404, freeTrialPrivilege: { cannotListenReason: 1 } }] }, cookie: {} }))

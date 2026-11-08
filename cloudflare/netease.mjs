@@ -59,6 +59,8 @@ export function endpoint(method, query = {}, uid) {
       const encodeType = ['mp3', 'aac'].includes(query.encodeType) ? query.encodeType : 'mp3'
       return ['/api/song/enhance/player/url/v1', { ids: JSON.stringify([Number(id(query.id))]), level, encodeType }]
     }
+    // Older bitrate-capped endpoint: only used by the worker when v1 keeps returning a lossless master.
+    case 'song_url_legacy': return ['/api/song/enhance/player/url', { ids: JSON.stringify([Number(id(query.id))]), br: 128000 }]
     case 'listen_data_year_report': return ['/api/content/activity/listen/data/year/report', {}]
     case 'summary_annual': {
       const year = bounded(query.year, new Date().getUTCFullYear())
