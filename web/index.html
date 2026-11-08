@@ -188,18 +188,14 @@
     </section>
   </dialog>
 
-  <dialog id="shareDialog" class="share-sheet" aria-labelledby="shareTitle">
+  <dialog id="shareDialog" class="share-lightbox" aria-labelledby="shareTitle">
     <button type="button" class="dialog-close icon-button" id="closeShare" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <h2 id="shareTitle" class="sr-only">初听海报</h2>
     <div class="share-stage" id="shareStage" aria-busy="false"></div>
-    <header class="share-head">
-      <h2 id="shareTitle">初听海报</h2>
-      <p class="dialog-copy">画在这台设备上。没有链接，也不会上传。</p>
-    </header>
     <p id="shareStatus" class="share-status" role="status">正在排版海报…</p>
     <div class="share-actions">
-      <button type="button" class="button primary" id="shareSave" disabled>保存图片</button>
-      <button type="button" class="button ghost" id="shareNative" hidden>分享</button>
-      <button type="button" class="button ghost" id="shareCopy">复制文字</button>
+      <button type="button" class="text-button" id="shareSave" disabled>保存</button>
+      <button type="button" class="text-button" id="shareAction">分享</button>
     </div>
   </dialog>
 

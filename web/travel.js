@@ -62,10 +62,10 @@ export function travelFx(t) {
   }
 }
 
-// Prefer artwork along the travelled span (now → target), ordered toward the
-// destination and deduped by cover URL. Never pad with letter tiles when at
-// least one real cover exists; the letter fallback is only for empty archives.
-export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
+// Up to 48 distinct covers, picked at random from the whole archive and
+// deduped by cover URL. Never pad with letter tiles when at least one real
+// cover exists; the letter fallback is only for empty archives.
+export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS, rng = Math.random) {
   const list = Array.isArray(events) ? events : []
   const cap = Math.max(1, Math.min(TRAVEL_MAX_COVERS, limit || TRAVEL_MAX_COVERS))
   const out = [], seen = new Set()
@@ -79,37 +79,15 @@ export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
   const rest = list.filter(e => e && e.song_id !== target?.song_id)
   const pictured = rest.filter(e => e.cover)
   const pool = pictured.length ? pictured : rest
-  const to = target?.first_listen_ms
-  const from = Date.now()
-  const lo = Number.isFinite(to) ? Math.min(from, to) : -Infinity
-  const hi = Number.isFinite(to) ? Math.max(from, to) : Infinity
-  const along = [], outside = []
-  for (const e of pool) {
-    const t = e.first_listen_ms
-    if (Number.isFinite(to) && Number.isFinite(t) && t >= lo && t <= hi) along.push(e)
-    else outside.push(e)
-  }
-  const byDate = (a, b) => (a.first_listen_ms || 0) - (b.first_listen_ms || 0)
-  along.sort(byDate)
-  outside.sort(byDate)
-  if (Number.isFinite(to) && from > to) {
-    along.reverse()
-    outside.reverse()
-  }
   const reserve = target && (target.cover || !pictured.length) ? 1 : 0
   const budget = cap - reserve
-  const sample = (arr, want) => {
-    if (!arr.length || want <= 0 || out.length >= budget) return
-    if (arr.length <= want) {
-      for (const e of arr) { if (out.length >= budget) break; add(e) }
-      return
-    }
-    const step = arr.length / want
-    for (let i = 0; i < want && out.length < budget; i++) add(arr[Math.min(arr.length - 1, Math.floor(i * step))])
-    for (const e of arr) { if (out.length >= budget) break; add(e) }
+  const shuffled = pool.slice()
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const n = Number(typeof rng === 'function' ? rng() : Math.random())
+    const j = Math.min(i, Math.max(0, Math.floor((Number.isFinite(n) ? n : 0) * (i + 1))))
+    const swap = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = swap
   }
-  sample(along, budget)
-  sample(outside, budget - out.length)
+  for (const e of shuffled) { if (out.length >= budget) break; add(e) }
   if (target && (target.cover || !pictured.length)) add(target)
   return out
 }

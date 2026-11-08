@@ -1,7 +1,7 @@
 'use strict'
 import { createBackend, remote } from './backend.js'
 import { insights } from './insights.js'
-import { canSharePoster, renderPoster, sharePayload } from './share.js'
+import { renderPoster, sharePayload, shareMethod } from './share.js'
 import { coverSize } from './archive-core.js'
 
 // Rotator / copy / player are nice-to-have. If a stale cache drops one of them, the archive
@@ -1193,9 +1193,17 @@ function decodeTravelCover(url) {
     }).catch(() => null)
   })
 }
+let travelCoverPick = null
+function refreshTravelCoverPick(target) {
+  travelCoverPick = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
+  return travelCoverPick
+}
+function tunnelCoverPick(target) {
+  if (!travelCoverPick?.length) refreshTravelCoverPick(target)
+  return travelCoverPick
+}
 function preloadTravelLibrary() {
-  const hint = capsule.todayPick || state.all[0]
-  const picked = pickTravelCovers(state.all, hint, TRAVEL_MAX_COVERS)
+  const picked = refreshTravelCoverPick(capsule.todayPick || state.all[0])
   for (const e of picked) if (e?.cover) decodeTravelCover(e.cover)
 }
 function readyTravelArts(picked) {
@@ -1209,32 +1217,14 @@ function readyTravelArts(picked) {
   }
   return out
 }
-function gatherTravelArts(target) {
-  const picked = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
-  const ready = readyTravelArts(picked)
-  const seen = new Set(ready.map(a => a.event.cover))
-  for (const extra of readyTravelArts(state.all)) {
-    if (!extra.event?.cover || seen.has(extra.event.cover)) continue
-    if (extra.event.song_id === target?.song_id) continue
-    seen.add(extra.event.cover)
-    ready.push(extra)
-  }
-  return fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
-}
-function uniqueTravelCovers(arts) {
-  return new Set((arts || []).map(a => a.event?.cover || a.cover).filter(Boolean)).size
+function gatherTravelArts(target, picked = tunnelCoverPick(target)) {
+  return fillTravelWall(readyTravelArts(picked).filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
 }
 async function collectTunnelArts(target) {
-  const picked = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
+  const picked = tunnelCoverPick(target)
   const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover) : Promise.resolve(null))
-  const settle = Promise.all(pending).catch(() => {})
-  await Promise.race([settle, new Promise(r => setTimeout(r, 1100))])
-  let arts = gatherTravelArts(target)
-  if (uniqueTravelCovers(arts) < 8) {
-    await Promise.race([settle, new Promise(r => setTimeout(r, 700))])
-    arts = gatherTravelArts(target)
-  }
-  return arts
+  await Promise.race([Promise.all(pending).catch(() => {}), new Promise(r => setTimeout(r, 900))])
+  return gatherTravelArts(target, picked)
 }
 function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
@@ -1258,7 +1248,7 @@ function buildTravelTunnel(target, arts) {
   const tunnel = $('travelTunnel')
   if (!tunnel) return 0
   tunnel.replaceChildren()
-  const ready = arts && arts.length ? arts : readyTravelArts(pickTravelCovers(state.all, target, 24))
+  const ready = arts && arts.length ? arts : readyTravelArts(tunnelCoverPick(target))
   const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
   const list = walls.length ? walls : fillTravelWall(ready, TRAVEL_TILES)
   if (!list.length) {
@@ -1454,12 +1444,9 @@ function startTravel(event, { source = 'random' } = {}) {
   cancelAnimationFrame(travel.raf)
   if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
-  const cached = gatherTravelArts(event)
-  const uniqueCached = uniqueTravelCovers(cached)
-  if (cached.length && uniqueCached >= 8) beginTravelMotion(event, cached)
-  else collectTunnelArts(event).then(arts => {
+  collectTunnelArts(event).then(arts => {
     if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
-    beginTravelMotion(event, arts.length ? arts : cached)
+    beginTravelMotion(event, arts)
   })
 }
 function rerollTravel() {
@@ -1932,10 +1919,24 @@ function saveShare() {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 async function nativeShare() {
-  if (!shareState.blob) return
-  const file = new File([shareState.blob], shareState.name, { type: 'image/png' })
-  try { await navigator.share({ files: [file], title: '初听', text: shareState.text }) }
-  catch (err) { if (err?.name !== 'AbortError') toast('没能分享出去', 'error') }
+  const text = shareState.text
+  const method = shareMethod(shareState.blob)
+  try {
+    if (method === 'files') {
+      const file = new File([shareState.blob], shareState.name, { type: 'image/png' })
+      await navigator.share({ files: [file], title: '初听', text })
+      return
+    }
+    if (method === 'text') {
+      await navigator.share({ title: '初听', text })
+      return
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+    toast('没能分享出去', 'error')
+    return
+  }
+  await copyShareText()
 }
 async function openShare() {
   const payload = sharePayload({ events: state.all })
@@ -1953,7 +1954,6 @@ async function openShare() {
   $('shareStage').replaceChildren()
   $('shareStage').setAttribute('aria-busy', 'true')
   $('shareSave').disabled = true
-  $('shareNative').hidden = true
   openModal(dialog)
   try {
     const { canvas, blob } = await renderPoster(payload.poster)
@@ -1966,20 +1966,18 @@ async function openShare() {
     status.hidden = true
     shareState.blob = blob
     $('shareSave').disabled = false
-    $('shareNative').hidden = !canSharePoster(blob)
   } catch {
     if (job !== shareJob) return
     $('shareStage').setAttribute('aria-busy', 'false')
     status.hidden = false
-    status.textContent = '海报没画出来，文字还可以复制。'
+    status.textContent = '海报没画出来，还可以分享文字。'
   }
 }
 $('shareButton')?.addEventListener('click', () => openShare())
 $('closeShare')?.addEventListener('click', () => closeDialog($('shareDialog')))
 $('shareDialog')?.addEventListener('close', () => { shareJob++ })
 $('shareSave')?.addEventListener('click', saveShare)
-$('shareCopy')?.addEventListener('click', () => copyShareText())
-$('shareNative')?.addEventListener('click', () => nativeShare())
+$('shareAction')?.addEventListener('click', () => nativeShare())
 $('settingsButton').addEventListener('click', () => { renderSettings(); openModal($('settingsDialog')) })
 $('closeSettings').addEventListener('click', () => closeDialog($('settingsDialog')))
 $('closeSong').addEventListener('click', () => closeDialog($('songDialog')))

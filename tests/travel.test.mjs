@@ -112,26 +112,25 @@ test('hero cover stays hidden until late, then grows out of the vanishing point'
   assert.ok(late.scale > early.scale)
 })
 
-test('pickTravelCovers prefers covers along the travelled span and caps at 48', () => {
+test('pickTravelCovers takes a random unique sample from the whole archive and caps at 48', () => {
   assert.equal(TRAVEL_MAX_COVERS, 48)
-  const targetMs = Date.parse('2024-03-01T00:00:00+09:00')
-  const target = { song_id: 't', cover: 'ct', first_listen_ms: targetMs, name: 'T' }
-  const along = Array.from({ length: 20 }, (_, i) => ({
-    song_id: `a${i}`,
-    cover: `along-${i}`,
-    first_listen_ms: targetMs + (i + 1) * 30 * 86400000
+  const target = { song_id: 't', cover: 'ct', name: 'T' }
+  const events = Array.from({ length: 80 }, (_, i) => ({
+    song_id: String(i),
+    cover: `c${i}`,
+    first_listen_ms: Date.parse('2020-01-01T00:00:00+09:00') + i * 86400000
   }))
-  const far = Array.from({ length: 20 }, (_, i) => ({
-    song_id: `f${i}`,
-    cover: `far-${i}`,
-    first_listen_ms: Date.parse('2016-01-01T00:00:00+09:00') + i * 86400000
-  }))
-  const covers = pickTravelCovers([...far, ...along, target], target, 10)
-  assert.ok(covers.length <= 10)
+  let n = 0
+  const rng = () => { const x = (n++ * 0.173) % 1; return x }
+  const covers = pickTravelCovers([...events, target], target, 12, rng)
+  assert.ok(covers.length <= 12)
+  assert.equal(covers.length, 12)
   assert.equal(covers.at(-1).song_id, 't')
-  const rest = covers.slice(0, -1)
-  const alongCount = rest.filter(e => String(e.cover).startsWith('along-')).length
-  assert.ok(alongCount >= 8, `expected most picks from the travelled span, got ${alongCount}`)
+  assert.equal(new Set(covers.map(e => e.cover)).size, covers.length)
+  const ids = covers.slice(0, -1).map(e => Number(e.song_id))
+  assert.ok(Math.max(...ids) - Math.min(...ids) > 20)
+  const again = pickTravelCovers([...events, target], target, 12, () => 0.9)
+  assert.notDeepEqual(covers.slice(0, -1).map(e => e.song_id), again.slice(0, -1).map(e => e.song_id))
 })
 
 test('pickTravelCovers dedupes by cover URL and keeps unique art', () => {

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { insights } from '../web/insights.js'
-import { canSharePoster, renderPoster, sharePayload } from '../web/share.js'
+import { canSharePoster, renderPoster, sharePayload, shareMethod, shareData } from '../web/share.js'
 
 const SECRET = {
   uid: '918273645501',
@@ -250,4 +250,25 @@ test('malformed dates and non-NetEase covers cannot smuggle secrets into the pos
 test('rendering the poster stays in the browser and sharing needs a file-capable share sheet', async () => {
   await assert.rejects(() => renderPoster({ first: {}, wall: [{}] }), /浏览器/)
   assert.equal(canSharePoster(null), false)
+})
+
+test('shareMethod prefers file share, then text share, then a clipboard copy', () => {
+  const blob = new Blob(['png'], { type: 'image/png' })
+  assert.equal(shareMethod(blob, { canShare: ({ files }) => Boolean(files?.length), share() {} }), 'files')
+  assert.equal(shareMethod(blob, { canShare: () => false, share() {} }), 'text')
+  assert.equal(shareMethod(blob, { share() {} }), 'text')
+  assert.equal(shareMethod(blob, {}), 'copy')
+  assert.equal(shareMethod(null, { canShare: () => true, share() {} }), 'text')
+  const files = shareData({ blob, text: '一段分享文案', name: 'chuting.png', title: '初听' }, { canShare: ({ files }) => Boolean(files?.length), share() {} })
+  assert.equal(files.method, 'files')
+  assert.equal(files.data.title, '初听')
+  assert.equal(files.data.text, '一段分享文案')
+  assert.equal(files.data.files.length, 1)
+  assert.equal('url' in files.data, false)
+  const textOnly = shareData({ blob, text: '一段分享文案' }, { share() {} })
+  assert.equal(textOnly.method, 'text')
+  assert.deepEqual(Object.keys(textOnly.data).sort(), ['text', 'title'])
+  const copied = shareData({ blob, text: '一段分享文案' }, {})
+  assert.equal(copied.method, 'copy')
+  assert.deepEqual(Object.keys(copied.data), ['text'])
 })
