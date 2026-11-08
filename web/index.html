@@ -26,6 +26,8 @@
   <link rel="modulepreload" href="/rotator.js">
   <link rel="modulepreload" href="/copy.js">
   <link rel="modulepreload" href="/player.js">
+  <link rel="modulepreload" href="/capsule.js">
+  <link rel="modulepreload" href="/travel.js">
   <script src="/app.js" type="module"></script>
 </head>
 <body>
@@ -57,6 +59,14 @@
         <p class="hero-tagline" id="heroTagline">每首歌，都有第一次响起的那天。</p>
         <p class="hero-story" id="heroStory">扫一下，把你喜欢的歌一首首送回第一次听见它的那天。</p>
         <p class="hero-sub" id="heroSub">先从你喜欢的歌开始，想多翻点，设置里再开。</p>
+        <div id="heroCapsule" class="hero-capsule" hidden>
+          <p class="hero-capsule-kicker">时光胶囊</p>
+          <p class="hero-capsule-line" id="heroCapsuleLine"></p>
+          <div class="hero-capsule-actions">
+            <button type="button" class="button ghost" id="heroTravelToday" hidden>穿越</button>
+            <button type="button" class="text-button" id="heroTravelRandom">随机回到过去</button>
+          </div>
+        </div>
         <div class="hero-actions">
           <button type="button" class="button primary large" id="heroAction" data-action="connect">连接网易云音乐</button>
           <a class="scroll-cue" href="#timelineSection" id="scrollCue" hidden><span>往下翻，从<span id="scrollCueText">最近的一首</span>开始</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5"/></svg></a>
@@ -107,6 +117,7 @@
             <button type="button" id="orderNewest" aria-pressed="true">最新在前</button>
             <button type="button" id="orderOldest" aria-pressed="false">从头讲起</button>
           </div>
+          <button type="button" class="button ghost capsule-launch" id="capsuleButton" hidden>时光胶囊</button>
         </div>
       </div>
       <div class="timeline-body">
@@ -128,6 +139,7 @@
 
   <div class="mini-player" id="miniPlayer" hidden>
     <button type="button" class="mini-open" id="miniOpen" aria-label="打开正在播放的歌"><span class="mini-cover" id="miniCover" aria-hidden="true"></span><span class="mini-text"><b id="miniTitle"></b><small id="miniArtist"></small></span></button>
+    <button type="button" class="icon-button" id="miniLocate" aria-label="在时间线中查看这首歌"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v2.4M8 12v2.4M1.6 8h2.4M12 8h2.4"/></svg></button>
     <button type="button" class="icon-button mini-play" id="miniPlay" aria-label="暂停"><svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8z"/></svg><svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9"/></svg></button>
     <button type="button" class="icon-button" id="miniClose" aria-label="停止播放"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
   </div>
@@ -216,11 +228,70 @@
     </div>
     <dl id="detailFacts"></dl>
     <div class="detail-actions">
-      <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+      <div class="detail-links">
+        <button type="button" class="button ghost" id="locateBtn">在时间线中查看</button>
+        <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+      </div>
       <span class="detail-nav">
         <button type="button" class="icon-button" id="prevSong" aria-label="上一首"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5"/></svg></button>
         <button type="button" class="icon-button" id="nextSong" aria-label="下一首"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
       </span>
+    </div>
+  </dialog>
+
+  <dialog id="capsuleDialog" class="capsule-sheet" aria-labelledby="capsuleTitle">
+    <button type="button" class="dialog-close icon-button" id="closeCapsule" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <div class="capsule-ribbon" id="capsuleRibbon" aria-hidden="true"></div>
+    <p class="kicker">音乐时光胶囊</p>
+    <h2 id="capsuleTitle">回到某一次初听</h2>
+    <div class="capsule-modes" role="tablist" aria-label="胶囊方式">
+      <button type="button" id="capsuleTodayBtn" role="tab" aria-selected="true">历史上的今天</button>
+      <button type="button" id="capsuleRandomBtn" role="tab" aria-selected="false">随机回到过去</button>
+    </div>
+    <div id="capsuleBody" class="capsule-body"></div>
+  </dialog>
+
+
+  <dialog id="travelOverlay" class="travel" aria-labelledby="travelTitle" aria-modal="true">
+    <div class="travel-stage" id="travelStage">
+      <div class="travel-bloom" id="travelBloom" aria-hidden="true"></div>
+      <div class="travel-tunnel" id="travelTunnel"></div>
+      <span class="travel-card travel-hero-card" id="travelHero" hidden></span>
+      <div class="travel-chroma" id="travelChroma" aria-hidden="true"></div>
+      <div class="travel-streaks" id="travelStreaks" aria-hidden="true"></div>
+      <div class="travel-flash" id="travelFlash" aria-hidden="true"></div>
+      <div class="travel-grain" aria-hidden="true"></div>
+      <div class="travel-clock" id="travelClock" aria-hidden="true">
+        <span class="travel-year" id="travelYear"></span>
+        <span class="travel-md">
+          <span class="travel-roll" id="travelMonth"></span>
+          <i>.</i>
+          <span class="travel-roll" id="travelDay"></span>
+        </span>
+        <span class="travel-progress" aria-hidden="true"><i id="travelBar"></i></span>
+        <span class="travel-pass" id="travelPass"></span>
+        <span class="travel-meta" id="travelMeta"></span>
+      </div>
+      <p class="travel-skip" id="travelSkip">点击或按 Esc 跳过</p>
+    </div>
+    <div class="travel-arrive" id="travelArrive" hidden>
+      <div class="arrive-bg" id="arriveBg" aria-hidden="true"></div>
+      <div class="arrive-veil" aria-hidden="true"></div>
+      <div class="arrive-inner">
+        <div class="arrive-art" id="arriveArt"></div>
+        <div class="arrive-copy">
+          <p class="arrive-when" id="arriveWhen"></p>
+          <h2 class="arrive-name" id="travelTitle"></h2>
+          <p class="arrive-artists" id="arriveArtists"></p>
+          <p class="arrive-note" id="arriveNote" hidden></p>
+          <div class="arrive-around" id="arriveAround"></div>
+          <div class="arrive-actions">
+            <button type="button" class="button primary" id="arriveReroll">再穿越一次</button>
+            <button type="button" class="button ghost" id="arriveLocate">在时间线中查看</button>
+            <button type="button" class="text-button" id="arriveBack">回到现在</button>
+          </div>
+        </div>
+      </div>
     </div>
   </dialog>
 

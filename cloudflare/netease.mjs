@@ -54,7 +54,9 @@ export function endpoint(method, query = {}, uid) {
     // Playable URL for the logged-in account (its VIP rights come with the session cookie).
     case 'song_url': {
       const level = ['standard', 'higher', 'exhigh'].includes(query.level) ? query.level : 'exhigh'
-      return ['/api/song/enhance/player/url/v1', { ids: JSON.stringify([Number(id(query.id))]), level, encodeType: 'flac' }]
+      // AAC/MP3 plays in every browser we care about; FLAC is still accepted if the client asks for it.
+      const encodeType = ['mp3', 'aac', 'flac'].includes(query.encodeType) ? query.encodeType : 'aac'
+      return ['/api/song/enhance/player/url/v1', { ids: JSON.stringify([Number(id(query.id))]), level, encodeType }]
     }
     case 'listen_data_year_report': return ['/api/content/activity/listen/data/year/report', {}]
     case 'summary_annual': {

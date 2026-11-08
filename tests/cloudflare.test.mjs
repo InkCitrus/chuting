@@ -117,17 +117,30 @@ test('player: the session is forwarded, the URL comes back over https from the a
   assert.deepEqual(body, { id: '7', url: null, reason: 'rights' })
   body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'https://evil.example/a.mp3', fee: 0 }] }, cookie: {} }))
   assert.equal(body.url, null); assert.equal(body.reason, 'unavailable')
+  // HTTP-only m8/m7 edges are rewritten to the HTTPS twins; official VOD hosts are allowed through.
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://m8.music.126.net/a.mp3', br: 128000, type: 'mp3', time: 1000, fee: 0 }] }, cookie: {} }))
+  assert.equal(body.url, 'https://m801.music.126.net/a.mp3')
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: 'http://vodkgeyttp9.vod.126.net/obj/a.mp3', br: 128000, type: 'mp3', time: 1000, fee: 0 }] }, cookie: {} }))
+  assert.equal(body.url, 'https://vodkgeyttp9.vod.126.net/obj/a.mp3')
+  // If the standard-quality retry throws, keep the first answer (rights / trial) instead of 500.
+  body = await ask(async (_method, query) => {
+    if (query.level === 'standard') throw new Error('upstream failed')
+    return { body: { code: 200, data: [{ id: 7, url: null, fee: 1 }] }, cookie: {} }
+  })
+  assert.deepEqual(body, { id: '7', url: null, reason: 'rights' })
 })
 test('player endpoint asks NetEase for one song at a bounded quality level', () => {
   const [path, data] = endpoint('song_url', { id: '7', level: 'lossless' })
   assert.equal(path, '/api/song/enhance/player/url/v1')
-  assert.deepEqual(data, { ids: '[7]', level: 'exhigh', encodeType: 'flac' })
+  assert.deepEqual(data, { ids: '[7]', level: 'exhigh', encodeType: 'aac' })
   assert.equal(endpoint('song_url', { id: '7', level: 'standard' })[1].level, 'standard')
+  assert.equal(endpoint('song_url', { id: '7', encodeType: 'mp3' })[1].encodeType, 'mp3')
+  assert.equal(endpoint('song_url', { id: '7', encodeType: 'ogg' })[1].encodeType, 'aac')
   assert.throws(() => endpoint('song_url', { id: '7;drop' }))
 })
 test('CSP lets audio play only from the NetEase CDN', async () => {
   const csp = (await handleApi(new Request(origin + '/api/runtime'), {})).headers.get('Content-Security-Policy')
-  assert.match(csp, /media-src 'self' https:\/\/\*\.music\.126\.net;/)
+  assert.match(csp, /media-src 'self' https:\/\/\*\.music\.126\.net https:\/\/\*\.vod\.126\.net;/)
 })
 
 test('avatarUrl is forwarded from login_status and stripped of query params', async () => {

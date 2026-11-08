@@ -4,7 +4,7 @@ import { seal, unseal, getSession, sessionCookie } from './session.mjs'
 
 export const securityHeaders = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; media-src 'self' https://*.music.126.net; connect-src 'self' https://*.music.126.net; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; media-src 'self' https://*.music.126.net https://*.vod.126.net; connect-src 'self' https://*.music.126.net https://*.vod.126.net; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 }
 function json(body, status = 200, extra = {}) { return Response.json(body, { status, headers: { ...securityHeaders, 'Cache-Control': 'no-store', ...extra } }) }
 async function input(request) {
@@ -35,11 +35,14 @@ function briefSong(song) {
 }
 // Audio comes straight from NetEase's CDN (m701/m801…music.126.net). URLs are signed and expire in minutes,
 // so they are handed to the page as-is (upgraded to https) and never cached anywhere.
-const AUDIO_HOST = /^([a-z0-9-]+\.)*music\.126\.net$/
+const AUDIO_HOST = /^([a-z0-9-]+\.)*(music|vod)\.126\.net$/
+// Older HTTP-only edges (m7/m8) fail after a blanket https: upgrade; their m701/m801 twins serve the same files.
+const AUDIO_HOST_REWRITE = { 'm7.music.126.net': 'm701.music.126.net', 'm8.music.126.net': 'm801.music.126.net' }
 export function audioUrl(value) {
   try {
     const url = new URL(String(value || ''))
     if (!['http:', 'https:'].includes(url.protocol) || !AUDIO_HOST.test(url.hostname)) return null
+    if (AUDIO_HOST_REWRITE[url.hostname]) url.hostname = AUDIO_HOST_REWRITE[url.hostname]
     url.protocol = 'https:'
     return url.toString()
   } catch { return null }
@@ -102,10 +105,13 @@ export async function handleApi(request, env, upstream = callNetease) {
     if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })
     if (body.method === 'song_url') {
       let answer = playable(result.body, body.query?.id)
-      // Some tracks have no high-bitrate file: ask once more at standard quality.
+      // Some tracks have no high-bitrate file, or only a trial clip at the first level: ask once more
+      // at standard MP3. If that extra call fails, keep the first answer instead of failing the request.
       if ((!answer.url || answer.trial) && body.query?.level !== 'standard') {
-        const again = playable((await upstream('song_url', { ...body.query, level: 'standard' }, session.cookie, session.account.uid)).body, body.query?.id)
-        if (again.url && (!again.trial || !answer.url)) answer = again
+        try {
+          const again = playable((await upstream('song_url', { ...body.query, level: 'standard', encodeType: 'mp3' }, session.cookie, session.account.uid)).body, body.query?.id)
+          if (again.url && (!again.trial || !answer.url)) answer = again
+        } catch {}
       }
       return json(answer)
     }
