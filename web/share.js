@@ -395,6 +395,26 @@ function wrapClamp(ctx, text, maxWidth, maxLines, spacing) {
 function tokensOf(text) {
   return text.match(/[A-Za-z0-9][A-Za-z0-9''.+-]*|[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]|./gu) || [text]
 }
+function wrapTitle(ctx, text, maxWidth, maxLines, spacing) {
+  if (maxLines < 2 || !/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/.test(text) || /[A-Za-z]{2,}/.test(text)) {
+    return wrapSmart(ctx, text, maxWidth, maxLines, spacing)
+  }
+  if (widthOf(ctx, text, spacing) <= maxWidth) return [text]
+  const chars = [...text]
+  const noStart = /[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮー々ンん]/
+  let best = null, bestScore = -Infinity
+  for (let i = 1; i < chars.length; i++) {
+    const a = chars.slice(0, i).join('')
+    const b = chars.slice(i).join('')
+    if (widthOf(ctx, a, spacing) > maxWidth || widthOf(ctx, b, spacing) > maxWidth) continue
+    let score = -Math.abs(widthOf(ctx, a, spacing) - widthOf(ctx, b, spacing))
+    if (noStart.test(b[0])) score -= 80
+    if (/[ズスーンッム]$/.test(a)) score += 12
+    score -= (a.length - b.length) * 3
+    if (score > bestScore) { best = [a, b]; bestScore = score }
+  }
+  return best || wrapSmart(ctx, text, maxWidth, maxLines, spacing)
+}
 function wrapSmart(ctx, text, maxWidth, maxLines, spacing) {
   const tokens = tokensOf(text)
   if (tokens.length <= 1) return wrapClamp(ctx, text, maxWidth, maxLines, spacing)
@@ -417,7 +437,17 @@ function wrapSmart(ctx, text, maxWidth, maxLines, spacing) {
   return lines
 }
 
-function traceNotched(ctx, w, h, kind, notch) {
+const PERF_X = 340
+const PERF_R = 3.15
+const PERF_PITCH = 11
+const PERF_PAD = 22
+function punchPerf(ctx, h) {
+  for (let y = PERF_PAD; y <= h - PERF_PAD + 0.01; y += PERF_PITCH) {
+    ctx.moveTo(PERF_X + PERF_R, y)
+    ctx.arc(PERF_X, y, PERF_R, 0, Math.PI * 2, true)
+  }
+}
+function traceNotched(ctx, w, h, kind, notch, holes) {
   const r = kind === 'mini' ? 3 : 6
   const nr = kind === 'mini' ? 5 : 9
   ctx.beginPath()
@@ -453,6 +483,7 @@ function traceNotched(ctx, w, h, kind, notch) {
     ctx.arcTo(0, 0, r, 0, r)
   }
   ctx.closePath()
+  if (holes && kind === 'main') punchPerf(ctx, h)
 }
 function place(ctx, x, y, w, h, deg, tx, ty, draw) {
   ctx.save()
@@ -465,8 +496,9 @@ function place(ctx, x, y, w, h, deg, tx, ty, draw) {
 }
 function grain(ctx, w, h, kind, alpha, notch) {
   ctx.save()
-  traceNotched(ctx, w, h, kind, notch)
-  ctx.clip()
+  const holes = kind === 'main'
+  traceNotched(ctx, w, h, kind, notch, holes)
+  ctx.clip(holes ? 'evenodd' : 'nonzero')
   ctx.globalAlpha = alpha
   ctx.globalCompositeOperation = 'multiply'
   const tile = noiseTile()
@@ -590,13 +622,13 @@ function drawFade(ctx) {
 function drawMainInk(ctx, w, h, poster) {
   grain(ctx, w, h, 'main', 0.2)
   ctx.save()
-  ctx.strokeStyle = DASH
-  ctx.lineWidth = 1.5
-  ctx.setLineDash([2.4, 2.4])
-  ctx.beginPath()
-  ctx.moveTo(340, 14)
-  ctx.lineTo(340, h - 14)
-  ctx.stroke()
+  ctx.strokeStyle = 'rgba(29,27,23,.2)'
+  ctx.lineWidth = 0.7
+  for (let y = PERF_PAD; y <= h - PERF_PAD + 0.01; y += PERF_PITCH) {
+    ctx.beginPath()
+    ctx.arc(PERF_X, y, PERF_R - 0.25, 0, Math.PI * 2)
+    ctx.stroke()
+  }
   ctx.restore()
 
   const textW = 340 - 26 - 16
@@ -646,27 +678,34 @@ function drawMainInk(ctx, w, h, poster) {
   ctx.textAlign = 'right'
   fillSpaced(ctx, poster.first.time, 322, base, tracking)
 
-  const stubMid = 340 + (w - 340) / 2
+  const stubMid = PERF_X + (w - PERF_X) / 2
+  const labelH = 10, numH = 34, barH = 30, ofH = 10
+  const stubTop = 30, stubBot = h - 28
+  const stubGap = (stubBot - stubTop - labelH - numH - barH - ofH) / 3
+  const yN = stubTop
+  const yNum = yN + labelH + stubGap
+  const yBar = yNum + numH + stubGap
+  const yOf = yBar + barH + stubGap
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
   ctx.fillStyle = FAINT
   ctx.font = `400 10px ${MONO}`
-  fillSpaced(ctx, 'Nº', stubMid, 42, 10 * 0.14)
+  fillSpaced(ctx, 'Nº', stubMid, yN, 10 * 0.14)
   ctx.fillStyle = INK
   ctx.font = `300 34px ${MONO}`
-  fillSpaced(ctx, poster.stub.number, stubMid, 64, 34 * 0.02)
-  barcode(ctx, stubMid - 36, 114, 72, 28)
+  fillSpaced(ctx, poster.stub.number, stubMid, yNum, 34 * 0.02)
+  barcode(ctx, stubMid - 36, yBar, 72, barH)
   ctx.fillStyle = FAINT
   ctx.font = `400 10px ${MONO}`
-  fillSpaced(ctx, `OF ${poster.stub.of}`, stubMid, 154, 10 * 0.14)
+  fillSpaced(ctx, `OF ${poster.stub.of}`, stubMid, yOf, 10 * 0.14)
   ctx.textAlign = 'left'
 }
 function drawMain(ctx, poster) {
   const x = 44, y = 318, w = 452, h = 206
   const backs = [
-    { deg: -7, tx: -6, ty: 22, color: PAPER_3 },
-    { deg: 3.5, tx: 10, ty: 10, color: PAPER_2 },
-    { deg: -2.2, tx: 0, ty: 0, color: PAPER },
+    { deg: -7, tx: -6, ty: 22, color: PAPER_3, holes: false },
+    { deg: 3.5, tx: 10, ty: 10, color: PAPER_2, holes: false },
+    { deg: -2.2, tx: 0, ty: 0, color: PAPER, holes: true },
   ]
   ctx.save()
   ctx.shadowColor = 'rgba(0,0,0,.42)'
@@ -674,9 +713,9 @@ function drawMain(ctx, poster) {
   ctx.shadowOffsetY = 16
   for (const back of backs) {
     place(ctx, x, y, w, h, back.deg, back.tx, back.ty, c => {
-      traceNotched(c, w, h, 'main')
+      traceNotched(c, w, h, 'main', undefined, back.holes)
       c.fillStyle = back.color
-      c.fill()
+      c.fill(back.holes ? 'evenodd' : 'nonzero')
     })
   }
   ctx.restore()
@@ -711,7 +750,7 @@ function drawMini(ctx, card, index, images) {
 
     const img = card.cover ? images.get(card.cover) : null
     paintCover(c, img, 12, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0' })
-    const textX = 66, textW = w - textX - 10
+    const textX = 64, textW = w - textX - 6
     c.textAlign = 'left'
     c.textBaseline = 'top'
     c.fillStyle = ACCENT
@@ -721,7 +760,7 @@ function drawMini(ctx, card, index, images) {
     fillSpaced(c, label, textX, 16, tracking)
     c.fillStyle = INK
     c.font = `600 13px ${SERIF}`
-    const lines = wrapSmart(c, card.title, textW, 2, 13 * 0.02)
+    const lines = wrapTitle(c, card.title, textW, 2, 13 * 0.02)
     lines.forEach((line, i) => fillSpaced(c, line, textX, 32 + i * 16, 13 * 0.02))
     c.fillStyle = MINI_MUTED
     c.font = `400 10px ${SERIF}`
@@ -729,14 +768,24 @@ function drawMini(ctx, card, index, images) {
     if (subY < notchY - 6) fillSpaced(c, ellipsis(c, card.subtitle, textW, 0), textX, subY, 0)
 
     c.textBaseline = 'alphabetic'
+    const base = h - 14
+    const left = 14, right = w - 14
+    c.font = `300 20px ${MONO}`
+    const valueW = widthOf(c, card.value, 0)
+    c.font = `400 10px ${MONO}`
+    const unitW = widthOf(c, card.unit, 10 * 0.06)
     c.font = `300 20px ${MONO}`
     c.fillStyle = INK
-    const base = h - 14
-    fillSpaced(c, card.value, 12, base, 0)
+    c.textAlign = 'left'
+    fillSpaced(c, card.value, left, base, 0)
     c.font = `400 10px ${MONO}`
     c.fillStyle = MINI_MUTED
-    c.textAlign = 'right'
-    fillSpaced(c, card.unit, w - 12, base, 10 * 0.06)
+    const unitBase = base - 3
+    if (left + valueW + 8 + unitW > right) fillSpaced(c, card.unit, left + valueW + 6, unitBase, 10 * 0.06)
+    else {
+      c.textAlign = 'right'
+      fillSpaced(c, card.unit, right, unitBase, 10 * 0.06)
+    }
   })
 }
 function drawClock(ctx, poster) {
