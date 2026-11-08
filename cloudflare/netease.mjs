@@ -54,8 +54,9 @@ export function endpoint(method, query = {}, uid) {
     // Playable URL for the logged-in account (its VIP rights come with the session cookie).
     case 'song_url': {
       const level = ['standard', 'higher', 'exhigh'].includes(query.level) ? query.level : 'exhigh'
-      // AAC/MP3 plays in every browser we care about; FLAC is still accepted if the client asks for it.
-      const encodeType = ['mp3', 'aac', 'flac'].includes(query.encodeType) ? query.encodeType : 'aac'
+      // MP3 is the default. An AAC request can still come back as FLAC when that is the other
+      // master on the song, and browsers then report media error 4. Never ask for FLAC here.
+      const encodeType = ['mp3', 'aac'].includes(query.encodeType) ? query.encodeType : 'mp3'
       return ['/api/song/enhance/player/url/v1', { ids: JSON.stringify([Number(id(query.id))]), level, encodeType }]
     }
     case 'listen_data_year_report': return ['/api/content/activity/listen/data/year/report', {}]
