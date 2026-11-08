@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPlayer, PLAYER_LINES, FALLBACK_QUERY, playErrorMessage, audioHosts } from '../web/player.js'
+import { createPlayer, PLAYER_LINES, PLAY_QUERY, FALLBACK_QUERY, playErrorMessage, audioHosts, hardAnswer, cloudUnplayableMessage, browserCanPlay } from '../web/player.js'
 
 class FakeAudio extends EventTarget {
   constructor() {
@@ -104,12 +104,26 @@ test('playErrorMessage does not call every code-4 failure a format problem', () 
   assert.equal(playErrorMessage({ name: 'NotSupportedError' }, { code: 4 }, { url: 'https://m801.music.126.net/a.mp3', type: 'mp3' }), PLAYER_LINES.failed)
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: 'https://m801.music.126.net/a.flac', type: 'flac' }), PLAYER_LINES.unsupported)
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: 'https://m801.music.126.net/a.flac', level: 'hires' }), PLAYER_LINES.unsupported)
+  assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: 'https://m801.music.126.net/a.ape', type: 'ape', cloud: true, format: 'ape' }), '网盘里这首是 APE 格式，浏览器放不了')
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: null, reason: 'rights' }), PLAYER_LINES.rights)
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: null, reason: 'copyright' }), PLAYER_LINES.copyright)
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: null, reason: 'unavailable' }), PLAYER_LINES.unavailable)
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: 'https://m801.music.126.net/clip.mp3', type: 'mp3', trial: { start: 0, end: 30 } }), PLAYER_LINES.rights)
   assert.equal(playErrorMessage({ name: 'Error' }), PLAYER_LINES.failed)
   assert.deepEqual(FALLBACK_QUERY, { level: 'standard', encodeType: 'mp3' })
+  assert.deepEqual(PLAY_QUERY, { encodeType: 'mp3' })
+  assert.equal(hardAnswer({ url: 'https://m801.music.126.net/a.mp3', type: 'mp3', level: 'lossless' }), false)
+  assert.equal(hardAnswer({ url: 'https://m801.music.126.net/a.ape', type: 'ape' }), true)
+  assert.equal(hardAnswer({ url: 'https://m801.music.126.net/a.m4a', type: 'm4a', level: 'exhigh', br: 256000 }), false)
+  assert.equal(hardAnswer({ url: 'https://m801.music.126.net/a.m4a', type: 'm4a', encodeType: 'alac', level: 'lossless', br: 900000 }), true)
+  assert.equal(hardAnswer({ url: 'https://m801.music.126.net/a.m4a', type: 'm4a', level: 'dolby', br: 768000 }), true)
+  assert.equal(hardAnswer({ url: 'https://m801.music.126.net/a.bin', encodeType: 'flac' }), true)
+  assert.equal(cloudUnplayableMessage({ cloud: true, format: 'ape' }), '网盘里这首是 APE 格式，浏览器放不了')
+  assert.equal(cloudUnplayableMessage({ cloud: true, type: 'flac', url: 'https://m801.music.126.net/a.flac' }), '网盘里这首是 FLAC 格式，浏览器放不了')
+  assert.equal(browserCanPlay({ url: 'https://m801.music.126.net/a.mp3', type: 'mp3' }), true)
+  assert.equal(browserCanPlay({ url: 'https://m801.music.126.net/a.ape', type: 'ape' }), false)
+  assert.equal(browserCanPlay({ url: 'https://m801.music.126.net/a.flac', type: 'flac' }, mime => mime.includes('flac') ? 'probably' : ''), true)
+  assert.equal(browserCanPlay({ url: 'https://m801.music.126.net/a.flac', type: 'flac' }, () => ''), false)
 })
 
 test('a FLAC URL falls back to standard mp3 even if the browser claims it can play flac', async () => {
@@ -130,7 +144,7 @@ test('a FLAC URL falls back to standard mp3 even if the browser claims it can pl
     })
     await player.play({ song_id: '28151022', name: '鳥の詩', artists: 'Lia' })
     await new Promise(r => setTimeout(r, 40))
-    assert.deepEqual(queries[0], {})
+    assert.deepEqual(queries[0], PLAY_QUERY)
     assert.equal(queries.length, 2)
     assert.deepEqual(queries[1], FALLBACK_QUERY)
     assert.equal(env.audio().src, 'https://m801.music.126.net/ok.mp3')
@@ -185,7 +199,7 @@ test('a code-4 failure on mp3 retries once, then the button returns to play', as
     await player.play({ song_id: '28151022', name: '鳥の詩', artists: 'Lia' })
     await new Promise(r => setTimeout(r, 50))
     assert.equal(queries.length, 2)
-    assert.deepEqual(queries[0], {})
+    assert.deepEqual(queries[0], PLAY_QUERY)
     assert.deepEqual(queries[1], FALLBACK_QUERY)
     assert.equal(note.textContent, PLAYER_LINES.failed)
     assert.equal(note.textContent.includes('格式'), false)
@@ -405,6 +419,65 @@ test('an unplayable answer notifies onUnplayable', async () => {
     assert.equal(seen?.reason, 'rights')
     assert.equal(player.current.song_id, 'vip')
     assert.equal(player.playing, false)
+  } finally {
+    env.restore()
+  }
+})
+
+test('a cloud APE answer falls back once, then names the format instead of the generic line', async () => {
+  const env = install('probably')
+  try {
+    const { els, mini, note } = mount()
+    const queries = []
+    const player = createPlayer({
+      els, mini,
+      getUrl: async (_event, query = {}) => {
+        queries.push({ ...query })
+        return { url: 'https://m801.music.126.net/bad-flac.ape', type: 'ape', br: 850000, duration: 233000, cloud: true, format: 'ape' }
+      },
+      coverFor: () => null,
+      onEnded() {},
+      onOpen() {}
+    })
+    await player.play({ song_id: '42', name: 'Fixture One', artists: 'Demo' })
+    await new Promise(r => setTimeout(r, 50))
+    assert.deepEqual(queries[0], PLAY_QUERY)
+    assert.deepEqual(queries[1], FALLBACK_QUERY)
+    assert.equal(queries.length, 2)
+    assert.equal(note.textContent, '网盘里这首是 APE 格式，浏览器放不了')
+    assert.equal(note.textContent.includes('这边放不了'), false)
+    assert.equal(els.play.label, '播放')
+    assert.equal(player.playing, false)
+  } finally {
+    env.restore()
+  }
+})
+
+test('a cloud upload that later returns standard mp3 plays after the encode fallback', async () => {
+  const env = install('')
+  try {
+    const { els, mini, note } = mount()
+    const queries = []
+    const player = createPlayer({
+      els, mini,
+      getUrl: async (_event, query = {}) => {
+        queries.push({ ...query })
+        if (query.level === 'standard' && query.encodeType === 'mp3') {
+          return { url: 'https://m801.music.126.net/ok.mp3', type: 'mp3', br: 128000, duration: 180000 }
+        }
+        return { url: 'https://m801.music.126.net/bad-flac.ape', type: 'ape', level: 'lossless', br: 850000, duration: 180000 }
+      },
+      coverFor: () => null,
+      onEnded() {},
+      onOpen() {}
+    })
+    await player.play({ song_id: '99', name: 'Fixture Two', artists: 'Demo' })
+    await new Promise(r => setTimeout(r, 40))
+    assert.deepEqual(queries[0], PLAY_QUERY)
+    assert.deepEqual(queries[1], FALLBACK_QUERY)
+    assert.equal(env.audio().src, 'https://m801.music.126.net/ok.mp3')
+    assert.equal(player.playing, true)
+    assert.equal(note.textContent.includes('格式') || note.textContent.includes('没放出来'), false)
   } finally {
     env.restore()
   }

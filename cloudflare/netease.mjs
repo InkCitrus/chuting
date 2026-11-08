@@ -61,6 +61,15 @@ export function endpoint(method, query = {}, uid) {
     }
     // Older bitrate-capped endpoint: only used by the worker when v1 keeps returning a lossless master.
     case 'song_url_legacy': return ['/api/song/enhance/player/url', { ids: JSON.stringify([Number(id(query.id))]), br: 128000 }]
+    case 'song_download_url': {
+      const br = [128000, 192000, 320000].includes(Number(query.br)) ? Number(query.br) : 128000
+      return ['/api/song/enhance/download/url', { id: Number(id(query.id)), br }]
+    }
+    case 'song_download_url_v1': {
+      const level = ['standard', 'higher', 'exhigh'].includes(query.level) ? query.level : 'standard'
+      const encodeType = ['mp3', 'aac'].includes(query.encodeType) ? query.encodeType : 'mp3'
+      return ['/api/song/enhance/download/url/v1', { id: Number(id(query.id)), level, encodeType }, 'weapi']
+    }
     // Catalogue search, used only to find a streamable twin of a cloud-drive (uploaded) song.
     case 'song_search': {
       const text = String(query.s || '').trim().slice(0, 200)

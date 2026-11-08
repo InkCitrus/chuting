@@ -14,18 +14,61 @@ export const PLAYER_LINES = {
   loading: '正在找这首歌…'
 }
 // Standard MP3 is the most widely decodable web fallback after a FLAC / hi-res URL fails.
+export const PLAY_QUERY = { encodeType: 'mp3' }
 export const FALLBACK_QUERY = { level: 'standard', encodeType: 'mp3' }
-export const HARD_TYPES = new Set(['flac', 'wav', 'ape', 'aiff', 'dsf', 'dff'])
-const HARD_LEVELS = new Set(['lossless', 'hires', 'jyeffect', 'sky', 'jymaster'])
-const LOSSY_TYPES = new Set(['mp3', 'aac', 'm4a'])
+export const HARD_TYPES = new Set(['flac', 'wav', 'ape', 'aiff', 'dsf', 'dff', 'alac', 'wma'])
+const HARD_LEVELS = new Set(['lossless', 'hires', 'jyeffect', 'sky', 'jymaster', 'dolby'])
+const SIMPLE_LOSSY = new Set(['mp3', 'aac', 'ogg', 'opus'])
+const IMMERSIVE = new Set(['jyeffect', 'sky', 'jymaster', 'dolby'])
 // Code 4 (MEDIA_ERR_SRC_NOT_SUPPORTED) also fires for 403/404/HTML, an empty body, or a fee wall.
 // The format line is only honest when the file itself is a hard type the browser did not decode.
+export function audioKind(answer) {
+  if (!answer) return ''
+  const type = String(answer.type || '').toLowerCase()
+  const encode = String(answer.encodeType || '').toLowerCase()
+  const format = String(answer.format || '').toLowerCase()
+  let ext = ''
+  try {
+    const path = new URL(answer.url || '', 'https://music.126.net').pathname.toLowerCase()
+    ext = (path.match(/\.([a-z0-9]{2,5})$/) || [])[1] || ''
+  } catch {}
+  return format || encode || type || ext
+}
 export function hardAnswer(answer) {
   if (!answer?.url) return false
-  const type = String(answer.type || '').toLowerCase()
-  if (HARD_TYPES.has(type)) return true
-  if (HARD_LEVELS.has(String(answer.level || '').toLowerCase())) return true
-  return Number(answer.br) > 320000 && Boolean(type) && !LOSSY_TYPES.has(type)
+  const type = String(answer.type || answer.encodeType || '').toLowerCase()
+  const encode = String(answer.encodeType || '').toLowerCase()
+  const level = String(answer.level || '').toLowerCase()
+  const kind = audioKind(answer)
+  const br = Number(answer.br) || 0
+  if (SIMPLE_LOSSY.has(type) || SIMPLE_LOSSY.has(kind)) return false
+  if (HARD_TYPES.has(type) || HARD_TYPES.has(encode) || HARD_TYPES.has(kind)) return true
+  const boxed = type === 'm4a' || type === 'mp4' || kind === 'm4a' || kind === 'mp4'
+  if (boxed && (encode === 'alac' || IMMERSIVE.has(level) || (['lossless', 'hires'].includes(level) && br > 320000))) return true
+  if (boxed && encode !== 'alac' && !IMMERSIVE.has(level)) return false
+  if (HARD_LEVELS.has(level)) return true
+  return br > 320000 && Boolean(type) && !SIMPLE_LOSSY.has(type) && type !== 'm4a'
+}
+const FORMAT_LABEL = {
+  flac: 'FLAC', ape: 'APE', wav: 'WAV', aiff: 'AIFF', aif: 'AIFF', dsf: 'DSF', dff: 'DFF',
+  alac: 'ALAC', wma: 'WMA', dolby: '杜比全景声', jymaster: '超清母带', sky: '沉浸环绕声', jyeffect: '高清臻音'
+}
+export function formatLabel(type) {
+  const key = String(type || '').toLowerCase().replace(/^\./, '')
+  if (FORMAT_LABEL[key]) return FORMAT_LABEL[key]
+  return /^[a-z0-9]{2,8}$/.test(key) ? key.toUpperCase() : ''
+}
+export function cloudUnplayableMessage(answer) {
+  const label = formatLabel(answer?.format || audioKind(answer))
+  return label ? `网盘里这首是 ${label} 格式，浏览器放不了` : '网盘里这首的格式，浏览器放不了'
+}
+function probeCanPlay(mime) {
+  try { return Boolean(document.createElement('audio').canPlayType(mime)) } catch { return false }
+}
+export function browserCanPlay(answer, probe = probeCanPlay) {
+  if (!answer?.url) return false
+  if (!hardAnswer(answer)) return true
+  return audioKind(answer) === 'flac' && Boolean(probe('audio/flac') || probe('audio/x-flac'))
 }
 // NetEase serves each file from one storage zone, reachable as m7 or m701 (m8 or m801, …). The wrong
 // one answers 400 OperationZoneMismatch. The host NetEase gave is tried first, its twin only after a media error.
@@ -45,7 +88,7 @@ export function playErrorMessage(err, _mediaError, answer) {
   if (answer && !answer.url) return PLAYER_LINES[answer.reason] || PLAYER_LINES.unavailable
   if (answer?.reason === 'rights' || answer?.reason === 'copyright') return PLAYER_LINES[answer.reason]
   if (answer?.trial) return PLAYER_LINES.rights
-  if (hardAnswer(answer)) return PLAYER_LINES.unsupported
+  if (hardAnswer(answer)) return answer.cloud ? cloudUnplayableMessage(answer) : PLAYER_LINES.unsupported
   return PLAYER_LINES.failed
 }
 
@@ -168,7 +211,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
   }
   async function requestUrl(event, fallback, gen) {
     try {
-      return await getUrl(event, fallback ? FALLBACK_QUERY : {})
+      return await getUrl(event, fallback ? FALLBACK_QUERY : PLAY_QUERY)
     } catch (err) {
       if (!fallback && gen === state.gen) {
         try {
@@ -246,8 +289,11 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
         clearSrc()
         render(); return noteUnplayable(event, status())
       }
-      // Skip FLAC / hi-res even when canPlayType says yes: 24-bit files and mislabeled 403s both surface as code 4.
-      if (!state.retried && hardAnswer(answer)) return settle(gen, { name: 'Error' })
+      // Prefer a lower-level MP3 before asking the browser to decode FLAC / hi-res.
+      // After that retry, FLAC may play if canPlayType agrees; ape / ALAC / Dolby still will not.
+      if (hardAnswer(answer) && !(state.retried && browserCanPlay(answer))) {
+        return state.retried ? finish(gen, { name: 'Error' }) : settle(gen, { name: 'Error' })
+      }
       state.hosts = audioHosts(answer.url); state.hostIndex = 0
       mediaEpoch++
       audio.src = state.hosts[0]
