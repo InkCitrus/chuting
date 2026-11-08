@@ -51,6 +51,7 @@ const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 4
 const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
 const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 0, bloom: 0.4 }))
 const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
+const travelStageLayout = travelMod?.travelStageLayout || ((w, h) => ({ portrait: Number(h) > Number(w), wallX: 470, wallY: 278, faceCounts: [4, 4, 6, 6], perspective: 900, spacing: 310, zMin: -1640 }))
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
 const TRAVEL_MAX_COVERS = travelMod?.TRAVEL_MAX_COVERS || 48
@@ -1143,7 +1144,7 @@ function renderCapsuleRandom(body) {
 
 
 /* ---------- 时空穿梭 ---------- */
-const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0 }
+const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0, layout: null }
 function dismissCapsuleForTravel() {
   const d = $('capsuleDialog')
   if (!d?.open) return
@@ -1207,12 +1208,32 @@ function applyCardPose(el, pose) {
 function setText(el, text) {
   if (el && el.textContent !== text) el.textContent = text
 }
+function syncTravelStageLayout() {
+  const stage = $('travelStage')
+  const layout = travelStageLayout(stage?.clientWidth || innerWidth || 1280, stage?.clientHeight || innerHeight || 800)
+  travel.layout = layout
+  if (stage) {
+    stage.style.setProperty('--travel-perspective', `${layout.perspective}px`)
+    stage.classList.toggle('is-portrait', !!layout.portrait)
+  }
+  return layout
+}
+function paintTravelBack(event) {
+  const img = $('travelBackImg')
+  if (!img) return
+  const src = event?.cover && travelArts.get(event.cover)
+  if (!src) { img.hidden = true; return }
+  const url = src.currentSrc || src.src
+  if (img.getAttribute('src') !== url) img.src = url
+  img.hidden = false
+}
 function poseTravelCards(t, reverse = false) {
   const cards = $('travelTunnel')?.children || []
   const n = cards.length
+  const layout = travel.layout || syncTravelStageLayout()
   let pass = '', passZ = -Infinity
   for (let i = 0; i < n; i++) {
-    const pose = cardPose(i, n, t, reverse)
+    const pose = cardPose(i, n, t, reverse, layout)
     applyCardPose(cards[i], pose)
     if (pose.opacity > 0.55 && pose.z > passZ && cards[i].dataset.name) {
       passZ = pose.z
@@ -1642,7 +1663,9 @@ function beginTravelMotion(event, arts) {
   if (travel.event !== event || (travel.phase !== 'going' && travel.phase !== 'waiting')) return
   travel.phase = 'going'
   travel.clockAt = 0
+  syncTravelStageLayout()
   buildTravelTunnel(event, arts)
+  paintTravelBack(travel.event || event)
   applyTravelGlow(event)
   if ($('travelClock')) $('travelClock').style.opacity = '1'
   poseTravelCards(0, false)
@@ -2332,6 +2355,7 @@ function followTravelPlayer(event) {
   if (travel.phase === 'going' || travel.phase === 'waiting') {
     travel.event = event
     travel.toMs = event.first_listen_ms || travel.toMs
+    paintTravelBack(event)
   }
 }
 function playRelative(delta) {

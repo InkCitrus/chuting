@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -144,4 +144,39 @@ test('pickTravelCovers dedupes by cover URL and keeps unique art', () => {
   assert.equal(new Set(covers.map(e => e.cover || `id:${e.song_id}`)).size, covers.length)
   assert.ok(covers.some(e => e.cover === 'shared'))
   assert.equal(covers.filter(e => e.cover === 'shared').length, 1)
+})
+
+test('portrait stage layout pulls the tunnel walls into a phone frame', () => {
+  const phone = travelStageLayout(390, 844)
+  assert.equal(phone.portrait, true)
+  assert.ok(phone.wallX >= 128 && phone.wallX <= 178)
+  assert.ok(phone.wallY > phone.wallX)
+  assert.deepEqual(phone.faceCounts, [6, 6, 4, 4])
+  assert.ok(phone.perspective < 900)
+  assert.ok(phone.spacing < 310)
+
+  const wide = travelStageLayout(1280, 800)
+  assert.equal(wide.portrait, false)
+  assert.equal(wide.wallX, 470)
+  assert.equal(wide.wallY, 278)
+  assert.equal(wide.perspective, 900)
+
+  const n = TRAVEL_TILES
+  const plain = cardPose(3, n, 0.2)
+  const viaWide = cardPose(3, n, 0.2, false, wide)
+  assert.equal(plain.x, viaWide.x)
+  assert.equal(plain.y, viaWide.y)
+  assert.equal(plain.z, viaWide.z)
+  assert.equal(plain.face, viaWide.face)
+
+  const left = cardPose(0, n, 0, false, phone)
+  const right = cardPose(phone.faceCounts[0], n, 0, false, phone)
+  assert.equal(left.face, 0)
+  assert.equal(right.face, 1)
+  assert.ok(Math.abs(left.x) <= phone.wallX + 0.5)
+  assert.ok(Math.abs(left.x) < 195, 'left wall stays inside a 390px frame')
+  assert.ok(right.x > 0 && Math.abs(right.x) < 195)
+
+  const faces = new Set([...Array(n)].map((_, i) => cardPose(i, n, 0.15, false, phone).face))
+  assert.equal(faces.size, 4)
 })
