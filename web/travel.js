@@ -1,23 +1,31 @@
 // Pure helpers for the time-travel sequence: timing, a rolling clock, and cover poses.
-export const TRAVEL_MS = 2800
+export const TRAVEL_MS = 3500
 export const TRAVEL_BACK_MS = 920
 export const TRAVEL_REDUCED_MS = 340
 export const TRAVEL_MAX_COVERS = 24
 export const TRAVEL_COVER_PX = 200
-export const TRAVEL_TILES = 80
+export const TRAVEL_TILES = 120
 export const TRAVEL_SIDES = 4
 export const TRAVEL_FACE_COUNTS = [4, 4, 6, 6]
-export const TRAVEL_RINGS = 4
+export const TRAVEL_RINGS = 6
 
 export function easeOut(t) {
   const x = Math.min(1, Math.max(0, Number(t) || 0))
   return 1 - (1 - x) ** 3
 }
 
-// Slow at both ends, fastest in the middle — accelerate, peak, then ease into arrival.
+// Slow at both ends, fastest in the middle. Extra duration sits in a high-speed
+// cruise before the peak (eased 0.5 at raw 2.1/3.5), then the same deceleration.
 export function easeTravel(t) {
   const x = Math.min(1, Math.max(0, Number(t) || 0))
-  return x * x * x * (x * (x * 6 - 15) + 10)
+  const accel = 0.9 / 3.5
+  const peak = 2.1 / 3.5
+  const oldAccel = 0.9 / 2.8
+  let u
+  if (x <= accel) u = (x / accel) * oldAccel
+  else if (x <= peak) u = oldAccel + ((x - accel) / (peak - accel)) * (0.5 - oldAccel)
+  else u = 0.5 + ((x - peak) / (1 - peak)) * 0.5
+  return u * u * u * (u * (u * 6 - 15) + 10)
 }
 
 export function lerp(a, b, t) {
@@ -82,7 +90,7 @@ export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
 export function fillTravelWall(items, want = TRAVEL_TILES) {
   const list = Array.isArray(items) ? items.filter(Boolean) : []
   if (!list.length) return []
-  const target = Math.min(80, Math.max(1, want || TRAVEL_TILES))
+  const target = Math.min(120, Math.max(1, want || TRAVEL_TILES))
   if (list.length >= target) return list.slice(0, target)
   const out = []
   while (out.length < target) out.push(list[out.length % list.length])
@@ -111,8 +119,8 @@ export function cardPose(i, n, t, reverse = false) {
   const { ring, face, col, rings, across } = tileLayout(i, n)
   const spacing = 310
   const length = rings * spacing
-  const zMin = -1020
-  const shift = p * length * 2.6
+  const zMin = -1640
+  const shift = p * length * 2.25
   let z = zMin + ring * spacing + shift
   z = zMin + ((z - zMin) % length + length) % length
 
@@ -127,11 +135,11 @@ export function cardPose(i, n, t, reverse = false) {
   else if (face === 2) { y = -wallY; x = offset * pitchX; rotateX = -24 }
   else { y = wallY; x = offset * pitchX; rotateX = 24 }
 
-  const nearness = Math.min(1, Math.max(0, (z + 1020) / 1280))
-  const brightness = 0.34 + 0.66 * nearness
+  const nearness = Math.min(1, Math.max(0, (z - zMin) / Math.max(1, length - 220)))
+  const brightness = 0.2 + 0.8 * nearness
   let opacity = 1
   if (z > 280) opacity = Math.max(0, 1 - (z - 280) / 140)
-  else if (z < zMin + 40) opacity = 0.5 + 0.5 * Math.max(0, (z - zMin) / 40)
+  else if (z < zMin + 90) opacity = 0.28 + 0.72 * Math.max(0, (z - zMin) / 90)
   return { x, y, z, opacity, rotate: 0, rotateX, rotateY, scale: 1, blur: 0, brightness, face, ring, side: face < 2 ? (face === 0 ? -1 : 1) : 0 }
 }
 

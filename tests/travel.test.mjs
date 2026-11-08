@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -12,12 +12,12 @@ test('easeOut stays in range and slows near the end', () => {
 test('easeTravel accelerates then decelerates', () => {
   assert.equal(easeTravel(0), 0)
   assert.equal(easeTravel(1), 1)
-  assert.ok(Math.abs(easeTravel(0.5) - 0.5) < 1e-9)
-  const early = easeTravel(0.2) - easeTravel(0)
-  const mid = easeTravel(0.6) - easeTravel(0.4)
-  const late = easeTravel(1) - easeTravel(0.8)
-  assert.ok(mid > early, 'should be faster in the middle than at the start')
-  assert.ok(mid > late, 'should be faster in the middle than at the end')
+  assert.ok(Math.abs(easeTravel(2.1 / 3.5) - 0.5) < 0.02, 'peak stays at eased 0.5, later in raw time')
+  const early = easeTravel(0.18) - easeTravel(0)
+  const cruise = easeTravel(0.5) - easeTravel(0.35)
+  const late = easeTravel(1) - easeTravel(0.85)
+  assert.ok(cruise > early, 'should be faster in the cruise than at the start')
+  assert.ok(cruise > late, 'should be faster in the cruise than at the end')
 })
 
 test('clock parts and lerp walk backward through a date', () => {
@@ -75,7 +75,10 @@ test('fillTravelWall repeats a short decoded set instead of inventing blanks', (
   assert.ok(wall.every(item => item.cover))
   assert.equal(fillTravelWall([], 18).length, 0)
   assert.equal(fillTravelWall(few, TRAVEL_TILES).length, TRAVEL_TILES)
-  assert.ok(TRAVEL_TILES <= 80)
+  assert.ok(TRAVEL_TILES <= 120)
+  assert.equal(TRAVEL_MS, 3500)
+  assert.equal(TRAVEL_RINGS, 6)
+  assert.equal(tileLayout(0, TRAVEL_TILES).rings, 6)
 })
 
 test('card poses tile four tunnel faces and stream toward the camera', () => {
