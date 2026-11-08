@@ -7,14 +7,25 @@ export const PLAYER_LINES = {
   unavailable: '这首暂时放不了，可能下架了。',
   trial: '只能试听一小段。',
   failed: '没放出来，再点一下试试？',
+  unsupported: '这首的格式在这边放不了。',
   offline: '没网，先不放歌了。',
   login: '扫码登录后就能听。',
   loading: '正在找这首歌…'
 }
+// Standard MP3 is the most widely decodable web fallback after a FLAC / hi-res URL fails.
+export const FALLBACK_QUERY = { level: 'standard', encodeType: 'mp3' }
+export const HARD_TYPES = new Set(['flac', 'wav', 'ape', 'aiff', 'dsf', 'dff'])
+export function playErrorMessage(err, mediaError) {
+  if (err?.name === 'NotAllowedError') return ''
+  if (err?.name === 'AbortError') return null
+  if (err?.name === 'NotSupportedError' || mediaError?.code === 4) return PLAYER_LINES.unsupported
+  return PLAYER_LINES.failed
+}
+
 export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
   const audio = new Audio()
   audio.preload = 'auto'
-  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, offline: false, seeking: false }
+  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, offline: false, seeking: false, gen: 0 }
   const isCurrent = () => state.shown && state.event && state.shown.song_id === state.event.song_id
   const setNote = text => { els.note.textContent = text; els.note.hidden = !text }
 
@@ -61,49 +72,85 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     if (!('mediaSession' in navigator) || !audio.duration || !isFinite(audio.duration)) return
     try { navigator.mediaSession.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, audio.duration) }) } catch {}
   }
-  async function load(event, { autoplay = true, at = 0 } = {}) {
-    state.event = event; state.answer = null; state.error = ''; state.loading = true; state.retried = at > 0
+  async function requestUrl(event, fallback) {
+    try {
+      return await getUrl(event, fallback ? FALLBACK_QUERY : {})
+    } catch (err) {
+      if (!fallback) {
+        try { return await getUrl(event, FALLBACK_QUERY) } catch { /* prefer the original error */ }
+      }
+      throw err
+    }
+  }
+  function seekWhenReady(at) {
+    if (!at) return
+    const seek = () => {
+      const end = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : at
+      try { audio.currentTime = Math.min(Math.max(0, at), end) } catch {}
+    }
+    if (audio.readyState >= 1) seek()
+    else audio.addEventListener('loadedmetadata', seek, { once: true })
+  }
+  async function load(event, { autoplay = true, at = 0, fallback = false } = {}) {
+    const gen = ++state.gen
+    state.event = event; state.answer = null; state.error = ''; state.loading = true; state.retried = fallback
     audio.pause(); audio.removeAttribute('src'); audio.load()
     mini.title.textContent = event.name; mini.artist.textContent = event.artists || ''
     mini.cover.replaceChildren(); const art = coverFor(event); if (art) { const img = new Image(); img.alt = ''; img.decoding = 'async'; img.src = art(96); mini.cover.append(img) }
     render(); session()
     try {
-      const answer = await getUrl(event)
-      if (state.event !== event) return
+      const answer = await requestUrl(event, fallback)
+      if (gen !== state.gen) return
       state.answer = answer
       if (!answer.url) { state.loading = false; render(); return }
+      // A FLAC / hi-res URL that this browser is unlikely to decode: skip straight to standard MP3.
+      if (!fallback && HARD_TYPES.has(answer.type) && typeof Audio !== 'undefined') {
+        const probe = document.createElement?.('audio')
+        const can = probe?.canPlayType?.(`audio/${answer.type}`) || ''
+        if (!can) return load(event, { autoplay, at, fallback: true })
+      }
       audio.src = answer.url
-      if (at) audio.currentTime = at
+      seekWhenReady(at)
       if (autoplay) await audio.play()
     } catch (err) {
-      if (state.event !== event) return
-      state.error = err?.name === 'NotAllowedError' ? '' : PLAYER_LINES.failed
+      if (gen !== state.gen) return
+      if (err?.name === 'AbortError') return
+      if (err?.name === 'NotAllowedError') { state.error = ''; state.loading = false; render(); return }
+      if (!fallback) return load(event, { autoplay, at, fallback: true })
+      state.error = playErrorMessage(err, audio.error) || PLAYER_LINES.failed
     }
+    if (gen !== state.gen) return
     state.loading = false
     render()
   }
   function toggle() {
     if (!isCurrent()) return state.shown && load(state.shown)
     if (!state.answer?.url) return load(state.event)
-    if (audio.paused) audio.play().catch(() => { state.error = PLAYER_LINES.failed; render() })
+    if (audio.paused) audio.play().catch(err => {
+      if (err?.name === 'AbortError') return
+      if (!state.retried) { load(state.event, { at: audio.currentTime || 0, fallback: true }); return }
+      state.error = playErrorMessage(err, audio.error) || PLAYER_LINES.failed; render()
+    })
     else audio.pause()
   }
-  // Signed URLs expire after a while: on a network/decode error, fetch a fresh one once and resume.
+  // Signed URLs expire; a decode / host failure should ask for a different quality once, not reuse the same URL.
   audio.addEventListener('error', () => {
     if (!state.event || !state.answer?.url) return
-    if (!state.retried) { const at = audio.currentTime; load(state.event, { at }); return }
-    state.error = PLAYER_LINES.failed; state.loading = false; render()
+    if (state.loading && !audio.src) return
+    if (!state.retried) { const at = audio.currentTime || 0; load(state.event, { at, fallback: true }); return }
+    state.error = playErrorMessage({ name: audio.error?.code === 4 ? 'NotSupportedError' : 'Error' }, audio.error) || PLAYER_LINES.failed
+    state.loading = false; render()
   })
   for (const type of ['play', 'pause', 'timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'waiting', 'playing']) audio.addEventListener(type, () => {
     if (type === 'waiting') state.loading = true
-    if (type === 'playing') state.loading = false
+    if (type === 'playing') { state.loading = false; state.error = '' }
     render()
     if (type === 'durationchange' || type === 'play') position()
     if ('mediaSession' in navigator && (type === 'play' || type === 'pause')) navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing'
   })
   audio.addEventListener('ended', () => onEnded(state.event))
   els.play.addEventListener('click', toggle)
-  mini.play.addEventListener('click', () => (audio.paused ? audio.play() : audio.pause()))
+  mini.play.addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()))
   mini.open.addEventListener('click', () => state.event && onOpen(state.event))
   mini.close.addEventListener('click', () => { audio.pause(); state.event = null; state.answer = null; render() })
   els.seek.addEventListener('input', () => { state.seeking = true; const d = audio.duration || 0; els.scrub.style.setProperty('--pos', els.seek.value / 1000); els.cur.textContent = fmt(d * els.seek.value / 1000) })
