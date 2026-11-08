@@ -61,6 +61,12 @@ export function endpoint(method, query = {}, uid) {
     }
     // Older bitrate-capped endpoint: only used by the worker when v1 keeps returning a lossless master.
     case 'song_url_legacy': return ['/api/song/enhance/player/url', { ids: JSON.stringify([Number(id(query.id))]), br: 128000 }]
+    // Catalogue search, used only to find a streamable twin of a cloud-drive (uploaded) song.
+    case 'song_search': {
+      const text = String(query.s || '').trim().slice(0, 200)
+      if (!text) throw new ApiError('缺少搜索词', 400)
+      return ['/api/cloudsearch/pc', { s: text, type: 1, limit: 10, offset: 0 }]
+    }
     case 'listen_data_year_report': return ['/api/content/activity/listen/data/year/report', {}]
     case 'summary_annual': {
       const year = bounded(query.year, new Date().getUTCFullYear())
