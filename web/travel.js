@@ -4,6 +4,10 @@ export const TRAVEL_BACK_MS = 920
 export const TRAVEL_REDUCED_MS = 340
 export const TRAVEL_MAX_COVERS = 48
 export const TRAVEL_COVER_PX = 200
+export const TRAVEL_COVER_PX_DESKTOP = 160
+export const TRAVEL_COVER_PX_MOBILE = 120
+export const TRAVEL_COVER_PX_LITE = 96
+export const TRAVEL_BACK_PX = 32
 export const TRAVEL_TILES = 120
 export const TRAVEL_SIDES = 4
 export const TRAVEL_FACE_COUNTS = [4, 4, 6, 6]
@@ -103,35 +107,62 @@ export function fillTravelWall(items, want = TRAVEL_TILES) {
   return out
 }
 
-export function travelStageLayout(width, height) {
+export function travelQuality({ reducedMotion, hardwareConcurrency, deviceMemory } = {}) {
+  if (reducedMotion) return 'reduced'
+  const cores = Number(hardwareConcurrency)
+  const mem = Number(deviceMemory)
+  if ((Number.isFinite(cores) && cores > 0 && cores <= 4) || (Number.isFinite(mem) && mem > 0 && mem <= 4)) return 'lite'
+  return 'full'
+}
+
+export function travelStageLayout(width, height, quality = 'full') {
   const w = Math.max(1, Number(width) || 0)
   const h = Math.max(1, Number(height) || 0)
   const portrait = h > w * 1.08
+  const lite = quality === 'lite' || quality === 'reduced'
   if (!portrait) {
+    const faceCounts = TRAVEL_FACE_COUNTS.slice()
+    const perRing = faceCounts.reduce((sum, count) => sum + count, 0)
+    const rings = lite ? 4 : 5
     return {
       portrait: false,
+      quality: lite ? 'lite' : 'full',
       wallX: 470,
       wallY: 278,
-      faceCounts: TRAVEL_FACE_COUNTS.slice(),
-      perspective: 900,
+      faceCounts,
+      perspective: 1200,
       spacing: 310,
       zMin: -1640,
-      rotateX: 24,
-      rotateY: 28
+      rotateX: lite ? 16 : 24,
+      rotateY: lite ? 20 : 28,
+      cornerInset: lite ? 64 : 80,
+      rings,
+      tiles: perRing * rings,
+      coverPx: lite ? TRAVEL_COVER_PX_LITE : TRAVEL_COVER_PX_DESKTOP
     }
   }
   // Side walls sit inside a phone frame so covers stream through the whole
-  // portrait, not only the far corners of a landscape-sized tube.
+  // portrait. Walls stay tilted; cards are inset from the corners and fade
+  // before they hit the near plane so perspective does not clip them into
+  // triangles. Fewer tiles keep a phone GPU at a drawable pace.
+  const faceCounts = lite ? [3, 3, 2, 2] : [5, 5, 3, 3]
+  const perRing = faceCounts.reduce((sum, count) => sum + count, 0)
+  const rings = lite ? 3 : 4
   return {
     portrait: true,
+    quality: lite ? 'lite' : 'full',
     wallX: Math.round(Math.min(178, Math.max(128, w * 0.42))),
     wallY: Math.round(Math.min(380, Math.max(248, h * 0.40))),
-    faceCounts: [6, 6, 4, 4],
-    perspective: 640,
+    faceCounts,
+    perspective: 880,
     spacing: 250,
     zMin: -1420,
-    rotateX: 14,
-    rotateY: 16
+    rotateX: lite ? 10 : 14,
+    rotateY: lite ? 12 : 16,
+    cornerInset: lite ? 48 : 58,
+    rings,
+    tiles: perRing * rings,
+    coverPx: lite ? TRAVEL_COVER_PX_LITE : TRAVEL_COVER_PX_MOBILE
   }
 }
 
@@ -164,8 +195,11 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
 
   const wallX = layout?.wallX ?? 470
   const wallY = layout?.wallY ?? 278
-  const pitchY = across > 1 ? (2 * wallY) / (across - 1) : 0
-  const pitchX = across > 1 ? (2 * wallX) / (across - 1) : 0
+  const inset = Math.max(0, Number(layout?.cornerInset) || 0)
+  const spanX = Math.max(40, wallX - inset)
+  const spanY = Math.max(40, wallY - inset)
+  const pitchY = across > 1 ? (2 * spanY) / (across - 1) : 0
+  const pitchX = across > 1 ? (2 * spanX) / (across - 1) : 0
   const offset = col - (across - 1) / 2
   const tiltY = layout?.rotateY ?? 28
   const tiltX = layout?.rotateX ?? 24
@@ -178,8 +212,17 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
   const nearness = Math.min(1, Math.max(0, (z - zMin) / Math.max(1, length - 220)))
   const brightness = 0.2 + 0.8 * nearness
   let opacity = 1
-  if (z > 280) opacity = Math.max(0, 1 - (z - 280) / 140)
-  else if (z < zMin + 90) opacity = 0.28 + 0.72 * Math.max(0, (z - zMin) / 90)
+  const farFade = layout?.portrait ? 160 : 90
+  const zFront = zMin + length
+  const nearSpan = layout ? Math.max(260, (layout.spacing || 310) + 40) : 140
+  const nearPad = 28
+  if (z >= 0) opacity = 0
+  else if (z > zFront - nearSpan) {
+    opacity = Math.max(0, (zFront - z - nearPad) / Math.max(1, nearSpan - nearPad))
+  } else if (z < zMin + farFade) {
+    opacity = Math.max(0, (z - zMin) / farFade)
+    if (z < zMin + 36) opacity = 0
+  }
   return { x, y, z, opacity, rotate: 0, rotateX, rotateY, scale: 1, blur: 0, brightness, face, ring, side: face < 2 ? (face === 0 ? -1 : 1) : 0 }
 }
 

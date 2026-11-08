@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, travelQuality, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -151,23 +151,33 @@ test('portrait stage layout pulls the tunnel walls into a phone frame', () => {
   assert.equal(phone.portrait, true)
   assert.ok(phone.wallX >= 128 && phone.wallX <= 178)
   assert.ok(phone.wallY > phone.wallX)
-  assert.deepEqual(phone.faceCounts, [6, 6, 4, 4])
-  assert.ok(phone.perspective < 900)
+  assert.deepEqual(phone.faceCounts, [5, 5, 3, 3])
+  assert.ok(phone.tiles < 80)
+  assert.equal(phone.rotateY, 16)
+  assert.equal(phone.rotateX, 14)
+  assert.ok(phone.coverPx <= 120)
+  assert.ok(phone.perspective >= 800 && phone.perspective < 900)
   assert.ok(phone.spacing < 310)
+  assert.ok(phone.cornerInset >= 48)
 
   const wide = travelStageLayout(1280, 800)
   assert.equal(wide.portrait, false)
   assert.equal(wide.wallX, 470)
   assert.equal(wide.wallY, 278)
-  assert.equal(wide.perspective, 900)
+  assert.equal(wide.perspective, 1200)
+  assert.ok(wide.tiles < TRAVEL_TILES)
+  assert.ok(wide.tiles >= 80)
+  assert.equal(wide.rotateY, 28)
+  assert.equal(wide.rotateX, 24)
+  assert.ok(wide.cornerInset >= 64)
 
   const n = TRAVEL_TILES
   const plain = cardPose(3, n, 0.2)
   const viaWide = cardPose(3, n, 0.2, false, wide)
-  assert.equal(plain.x, viaWide.x)
-  assert.equal(plain.y, viaWide.y)
-  assert.equal(plain.z, viaWide.z)
   assert.equal(plain.face, viaWide.face)
+  assert.equal(plain.z, viaWide.z)
+  assert.equal(plain.x, viaWide.x)
+  assert.ok(Math.abs(viaWide.y) < Math.abs(plain.y), 'wide layout insets end cards from the corners')
 
   const left = cardPose(0, n, 0, false, phone)
   const right = cardPose(phone.faceCounts[0], n, 0, false, phone)
@@ -176,7 +186,28 @@ test('portrait stage layout pulls the tunnel walls into a phone frame', () => {
   assert.ok(Math.abs(left.x) <= phone.wallX + 0.5)
   assert.ok(Math.abs(left.x) < 195, 'left wall stays inside a 390px frame')
   assert.ok(right.x > 0 && Math.abs(right.x) < 195)
+  assert.ok(Math.abs(left.y) < phone.wallY - 20, 'end cards sit inset from the tube corners')
+  assert.ok(left.rotateY > 0 && right.rotateY < 0)
+
+  const zFront = wide.zMin + wide.rings * wide.spacing
+  const sampled = [0, 0.2, 0.45, 0.7, 1].flatMap(t => [...Array(wide.tiles)].map((_, i) => cardPose(i, wide.tiles, t, false, wide)))
+  const close = sampled.filter(p => p.z > zFront - 80)
+  assert.ok(close.length > 0, 'some poses reach the front of the tunnel')
+  assert.ok(close.every(p => p.opacity < 0.35), 'cards fade before they hit the near plane')
+  assert.ok(sampled.filter(p => p.z >= 0).every(p => p.opacity === 0))
+  const vanished = sampled.filter(p => p.z < wide.zMin + 36)
+  assert.ok(vanished.length > 0 && vanished.every(p => p.opacity === 0))
 
   const faces = new Set([...Array(n)].map((_, i) => cardPose(i, n, 0.15, false, phone).face))
   assert.equal(faces.size, 4)
+})
+
+test('travelQuality picks a lighter path on constrained devices', () => {
+  assert.equal(travelQuality({ reducedMotion: true }), 'reduced')
+  assert.equal(travelQuality({ hardwareConcurrency: 4, deviceMemory: 4 }), 'lite')
+  assert.equal(travelQuality({ hardwareConcurrency: 8, deviceMemory: 8 }), 'full')
+  const lite = travelStageLayout(390, 844, 'lite')
+  assert.ok(lite.tiles < travelStageLayout(390, 844, 'full').tiles)
+  assert.ok(lite.rotateY >= 10)
+  assert.ok(lite.rotateX >= 8)
 })
