@@ -911,3 +911,96 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
     animation-delay: calc(var(--i, 0) * var(--stagger) + 40ms);
   }
 }
+
+/* 首页英雄上的时光胶囊入口：一条细线隔开正文，不和右侧唱片抢视线 */
+.hero-capsule { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line); max-width: 34em }
+.hero-capsule[hidden] { display: none }
+.hero-capsule-kicker { margin: 0 0 8px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; color: var(--accent) }
+.hero-capsule-line { margin: 0 0 14px; font-family: var(--serif); font-size: clamp(17px, 1.55vw, 20px); line-height: 1.5; color: var(--ink) }
+.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px }
+@media (prefers-reduced-motion: no-preference) {
+  .hero-capsule { animation: rise-in var(--d-4) var(--ease) both; animation-delay: calc(var(--stagger) * 11.5) }
+}
+
+/* 胶囊面板：顶上一溜封面，像从胶片里抽出来 */
+.capsule-ribbon { display: flex; gap: 6px; height: 54px; margin: -4px -8px 16px; overflow: hidden; pointer-events: none;
+  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent) }
+.capsule-film { width: 54px; height: 54px; border-radius: 6px; flex-shrink: 0; opacity: .86 }
+
+body.has-travel .mini-player,
+body.has-travel .to-top { visibility: hidden; pointer-events: none }
+
+/* 全屏穿越：始终暗底，像在暗房里倒带 */
+dialog.travel { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: #0c0b0a; color: #f3eee6; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; overflow: hidden }
+dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-backdrop-filter: none }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.travel[open] { animation: travel-in .4s var(--ease) }
+  dialog.travel.is-closing { animation: fade-out .22s ease-in forwards }
+}
+@keyframes travel-in { from { opacity: 0 } }
+
+.travel-stage { position: absolute; inset: 0; perspective: 920px; perspective-origin: 50% 46%; overflow: hidden }
+.travel-stage[hidden] { display: none }
+.travel-tunnel { position: absolute; inset: 0; transform-style: preserve-3d; pointer-events: none }
+.travel-card { position: absolute; left: 50%; top: 50%; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 10px;
+  overflow: hidden; background: #1a1816; box-shadow: 0 18px 40px rgb(0 0 0 / .5); will-change: transform, opacity; backface-visibility: hidden }
+.travel-whoosh { position: absolute; left: 50%; top: 46%; width: 80vmax; height: 80vmax; margin: -40vmax 0 0 -40vmax; border-radius: 50%;
+  pointer-events: none; background: radial-gradient(circle, rgb(243 238 230 / .16), transparent 64%); opacity: 0 }
+.travel.is-going .travel-whoosh { animation: travel-whoosh 2.6s var(--ease) both }
+@keyframes travel-whoosh { 0% { transform: scale(.32); opacity: 0 } 32% { opacity: .5 } 100% { transform: scale(1.38); opacity: 0 } }
+.travel-scan { position: absolute; inset: 0; pointer-events: none; opacity: .2;
+  background: repeating-linear-gradient(to bottom, transparent 0 3px, rgb(0 0 0 / .18) 3px 4px) }
+.travel-clock { position: absolute; left: 50%; top: 46%; translate: -50% -50%; text-align: center; z-index: 2; pointer-events: none;
+  text-shadow: 0 10px 40px rgb(0 0 0 / .55) }
+.travel-year { display: block; font-family: var(--mono); font-size: clamp(72px, 14vw, 168px); font-weight: 500; letter-spacing: -.06em;
+  line-height: .9; font-variant-numeric: tabular-nums }
+.travel-md { display: block; margin-top: .14em; font-family: var(--mono); font-size: clamp(22px, 3.4vw, 40px); letter-spacing: .28em;
+  color: rgb(243 238 230 / .7); font-variant-numeric: tabular-nums }
+.travel-md i { font-style: normal; opacity: .35; margin: 0 .04em }
+.travel-skip { position: absolute; left: 0; right: 0; bottom: calc(28px + env(safe-area-inset-bottom)); margin: 0; text-align: center;
+  font-size: 13px; letter-spacing: .16em; color: rgb(243 238 230 / .42) }
+.travel.is-arrive .travel-clock,
+.travel.is-arrive .travel-skip,
+.travel.is-arrive .travel-tunnel,
+.travel.is-arrive .travel-whoosh { opacity: 0; transition: opacity .45s var(--ease); pointer-events: none }
+
+.travel-arrive { position: absolute; inset: 0; display: grid; place-items: center; padding: 48px 28px 56px; overflow: auto }
+.travel-arrive[hidden] { display: none }
+.arrive-bg { position: absolute; inset: -48px; filter: blur(40px) saturate(1.12); transform: scale(1.08); opacity: .5 }
+.arrive-bg img { width: 100%; height: 100%; object-fit: cover; display: block }
+.arrive-veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgb(12 11 10 / .28), rgb(12 11 10 / .7) 42%, rgb(12 11 10 / .9)) }
+.arrive-inner { position: relative; z-index: 1; width: min(540px, 100%); display: flex; flex-direction: column; align-items: flex-start }
+.arrive-art { width: min(280px, 62vw); aspect-ratio: 1; border-radius: 14px; margin: 0 0 28px; overflow: hidden;
+  box-shadow: 0 32px 64px -28px rgb(0 0 0 / .75), 0 0 0 1px rgb(255 255 255 / .06) }
+.arrive-when { font-family: var(--mono); font-size: 13px; letter-spacing: .06em; color: rgb(243 238 230 / .58); margin: 0 0 10px }
+.arrive-name { font-family: var(--serif); font-size: clamp(32px, 5vw, 48px); font-weight: 900; line-height: 1.2; margin: 0 36px 8px 0; color: #f3eee6 }
+.arrive-artists { margin: 0 0 12px; color: rgb(243 238 230 / .7); font-size: 16px }
+.arrive-note { margin: 0 0 14px; font-size: 13.5px; color: color-mix(in srgb, var(--accent) 55%, #f3eee6) }
+.arrive-around { width: 100%; margin: 16px 0 4px }
+.arrive-around-label { font-size: 13px; color: rgb(243 238 230 / .48); margin: 0 0 10px }
+.arrive-around-list { display: flex; flex-wrap: wrap; gap: 8px }
+.arrive-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; border: 1px solid rgb(243 238 230 / .14);
+  background: rgb(243 238 230 / .06); color: #f3eee6; border-radius: 999px; padding: 5px 12px 5px 5px; font-size: 13px }
+.arrive-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.arrive-chip-cover { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0 }
+.arrive-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 26px }
+.travel .button.ghost { border-color: rgb(243 238 230 / .22); color: #f3eee6; background: rgb(243 238 230 / .06) }
+.travel .text-button { color: rgb(243 238 230 / .7) }
+@media (prefers-reduced-motion: no-preference) {
+  .travel.is-arrive .arrive-inner > * { animation: rise-in .6s var(--ease) both }
+  .travel.is-arrive .arrive-art { animation-delay: 40ms }
+  .travel.is-arrive .arrive-when { animation-delay: 90ms }
+  .travel.is-arrive .arrive-name { animation-delay: 130ms }
+  .travel.is-arrive .arrive-artists { animation-delay: 170ms }
+  .travel.is-arrive .arrive-note { animation-delay: 190ms }
+  .travel.is-arrive .arrive-around { animation-delay: 220ms }
+  .travel.is-arrive .arrive-actions { animation-delay: 260ms }
+}
+@media (prefers-reduced-motion: reduce) {
+  .travel-whoosh, .travel-scan { display: none }
+}
+@media (max-width: 720px) {
+  .arrive-art { width: min(220px, 70vw); margin-bottom: 22px }
+  .travel-card { width: 104px; height: 104px; margin: -52px 0 0 -52px }
+}

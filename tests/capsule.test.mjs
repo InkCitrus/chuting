@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { localYmd, yearsAgoLabel, monthDayDistance, onThisDay, nearestDay, capsuleToday, neighbors, randomMoment } from '../web/capsule.js'
+import { localYmd, yearsAgoLabel, monthDayDistance, onThisDay, nearestDay, capsuleToday, neighbors, randomMoment, sinceLabel } from '../web/capsule.js'
 
 const ev = (id, iso, extra = {}) => {
   const first_listen_ms = Date.parse(iso)
@@ -83,4 +83,15 @@ test('neighbors stay inside the window around a first-listen moment', () => {
   const far = ev(3, new Date(2024, 3, 20, 12, 0).toISOString())
   const around = neighbors([near, mid, far], mid, { days: 3, limit: 4 })
   assert.deepEqual(around.map(e => e.song_id), ['1'])
+})
+
+test('sinceLabel names the gap in years and months', () => {
+  const now = new Date(2026, 10, 8, 13, 0, 0)
+  assert.equal(sinceLabel(new Date(2025, 3, 13, 8, 2), now), '1 年 6 个月前')
+  assert.equal(sinceLabel(new Date(2025, 10, 8, 8, 0), now), '1 年前')
+  assert.equal(sinceLabel(new Date(2026, 9, 8, 8, 0), now), '1 个月前')
+  assert.equal(sinceLabel(new Date(2026, 10, 7, 13, 0), now), '昨天')
+  assert.equal(sinceLabel(now, now), '今天')
+  assert.equal(sinceLabel(new Date(2024, 10, 8, 12, 0), now), '2 年前')
+  assert.equal(sinceLabel(new Date(2027, 0, 1), now), '')
 })

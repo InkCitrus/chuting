@@ -25,7 +25,35 @@ export function playErrorMessage(err, mediaError) {
 export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
   const audio = new Audio()
   audio.preload = 'auto'
-  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, offline: false, seeking: false, gen: 0 }
+  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, offline: false, seeking: false, gen: 0, gain: 1, userVolume: 1, pendingFade: 0 }
+  let fadeRaf = 0
+  function applyGain(g) {
+    state.gain = Math.min(1, Math.max(0, g))
+    audio.volume = Math.min(1, Math.max(0, state.userVolume * state.gain))
+  }
+  function fadeGain(to, ms = 320) {
+    cancelAnimationFrame(fadeRaf)
+    const from = state.gain, dur = Math.max(0, Number(ms) || 0)
+    if (!dur) { applyGain(to); return Promise.resolve() }
+    const start = performance.now()
+    return new Promise(resolve => {
+      const step = now => {
+        const t = Math.min(1, (now - start) / dur)
+        applyGain(from + (to - from) * t)
+        if (t < 1) fadeRaf = requestAnimationFrame(step)
+        else resolve()
+      }
+      fadeRaf = requestAnimationFrame(step)
+    })
+  }
+  function status() {
+    return {
+      ok: Boolean(state.answer?.url) && !state.error,
+      error: state.error || '',
+      reason: state.answer?.reason || (state.error ? 'failed' : ''),
+      trial: Boolean(state.answer?.trial)
+    }
+  }
   const isCurrent = () => state.shown && state.event && state.shown.song_id === state.event.song_id
   const setNote = text => { els.note.textContent = text; els.note.hidden = !text }
 
@@ -92,6 +120,13 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     else audio.addEventListener('loadedmetadata', seek, { once: true })
   }
   async function load(event, { autoplay = true, at = 0, fallback = false } = {}) {
+    if (state.offline) {
+      state.event = event; state.answer = null; state.error = ''; state.loading = false; state.pendingFade = 0
+      audio.muted = false
+      applyGain(1)
+      render()
+      return { ok: false, error: PLAYER_LINES[state.offline] || PLAYER_LINES.offline, reason: state.offline, trial: false }
+    }
     const gen = ++state.gen
     state.event = event; state.answer = null; state.error = ''; state.loading = true; state.retried = fallback
     audio.pause(); audio.removeAttribute('src'); audio.load()
@@ -102,7 +137,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       const answer = await requestUrl(event, fallback)
       if (gen !== state.gen) return
       state.answer = answer
-      if (!answer.url) { state.loading = false; render(); return }
+      if (!answer.url) { state.pendingFade = 0; audio.muted = false; applyGain(1); state.loading = false; render(); return status() }
       // A FLAC / hi-res URL that this browser is unlikely to decode: skip straight to standard MP3.
       if (!fallback && HARD_TYPES.has(answer.type) && typeof Audio !== 'undefined') {
         const probe = document.createElement?.('audio')
@@ -111,17 +146,28 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       }
       audio.src = answer.url
       seekWhenReady(at)
+      if (state.pendingFade) { applyGain(0); audio.muted = true }
       if (autoplay) await audio.play()
+      if (state.pendingFade) {
+        const fade = state.pendingFade
+        state.pendingFade = 0
+        audio.muted = false
+        fadeGain(1, fade)
+      } else {
+        audio.muted = false
+        applyGain(1)
+      }
     } catch (err) {
-      if (gen !== state.gen) return
-      if (err?.name === 'AbortError') return
-      if (err?.name === 'NotAllowedError') { state.error = ''; state.loading = false; render(); return }
+      if (gen !== state.gen) return status()
+      if (err?.name === 'AbortError') return status()
+      if (err?.name === 'NotAllowedError') { state.pendingFade = 0; audio.muted = false; state.error = ''; state.loading = false; render(); return status() }
       if (!fallback) return load(event, { autoplay, at, fallback: true })
       state.error = playErrorMessage(err, audio.error) || PLAYER_LINES.failed
     }
-    if (gen !== state.gen) return
+    if (gen !== state.gen) return status()
     state.loading = false
     render()
+    return status()
   }
   function toggle() {
     if (!isCurrent()) return state.shown && load(state.shown)
@@ -157,9 +203,16 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
   els.seek.addEventListener('change', () => { state.seeking = false; if (audio.duration) audio.currentTime = audio.duration * els.seek.value / 1000; render() })
   if (els.volume) {
     let v = 1; try { v = Number(localStorage.getItem('chuting-volume') ?? 1) } catch {}
-    audio.volume = els.volume.value = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1
-    els.volume.style.setProperty('--vol', audio.volume)
-    els.volume.addEventListener('input', () => { audio.volume = Number(els.volume.value); els.volume.style.setProperty('--vol', audio.volume); try { localStorage.setItem('chuting-volume', String(audio.volume)) } catch {} })
+    state.userVolume = Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1
+    els.volume.value = String(state.userVolume)
+    applyGain(1)
+    els.volume.style.setProperty('--vol', state.userVolume)
+    els.volume.addEventListener('input', () => {
+      state.userVolume = Number(els.volume.value)
+      applyGain(state.gain)
+      els.volume.style.setProperty('--vol', state.userVolume)
+      try { localStorage.setItem('chuting-volume', String(state.userVolume)) } catch {}
+    })
   }
   if ('mediaSession' in navigator) {
     const set = (action, fn) => { try { navigator.mediaSession.setActionHandler(action, fn) } catch {} }
@@ -177,7 +230,30 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     },
     get current() { return state.event },
     get playing() { return Boolean(state.event) && !audio.paused },
-    play(event) { state.shown = state.shown || event; return load(event) },
+    play(event, opts = {}) {
+      state.shown = state.shown || event
+      if (opts.fadeIn) {
+        state.pendingFade = typeof opts.fadeIn === 'number' ? opts.fadeIn : 1500
+        applyGain(0)
+        audio.muted = true
+      }
+      return load(event, { autoplay: opts.autoplay !== false, at: opts.at || 0 })
+    },
+    unlock() {
+      try {
+        audio.muted = true
+        if (!audio.getAttribute('src')) audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+        const p = audio.play()
+        if (p && p.catch) p.catch(() => {})
+      } catch {}
+    },
+    duck(ms = 280) { return fadeGain(0, ms) },
+    get note() {
+      if (state.offline) return PLAYER_LINES[state.offline] || PLAYER_LINES.offline
+      if (state.error) return state.error
+      if (state.answer && !state.answer.url) return PLAYER_LINES[state.answer.reason] || PLAYER_LINES.unavailable
+      return ''
+    },
     setActions(prev, next) {
       if (!('mediaSession' in navigator)) return
       try { navigator.mediaSession.setActionHandler('previoustrack', prev); navigator.mediaSession.setActionHandler('nexttrack', next) } catch {}

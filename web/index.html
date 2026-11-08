@@ -26,6 +26,7 @@
   <link rel="modulepreload" href="/copy.js">
   <link rel="modulepreload" href="/player.js">
   <link rel="modulepreload" href="/capsule.js">
+  <link rel="modulepreload" href="/travel.js">
   <script src="/app.js" type="module"></script>
 </head>
 <body>
@@ -55,6 +56,14 @@
         <p class="hero-tagline" id="heroTagline">每首歌，都有第一次响起的那天。</p>
         <p class="hero-story" id="heroStory">扫一下，把你喜欢的歌一首首送回第一次听见它的那天。</p>
         <p class="hero-sub" id="heroSub">先从你喜欢的歌开始，想多翻点，设置里再开。</p>
+        <div id="heroCapsule" class="hero-capsule" hidden>
+          <p class="hero-capsule-kicker">时光胶囊</p>
+          <p class="hero-capsule-line" id="heroCapsuleLine"></p>
+          <div class="hero-capsule-actions">
+            <button type="button" class="button ghost" id="heroTravelToday" hidden>穿越</button>
+            <button type="button" class="text-button" id="heroTravelRandom">随机回到过去</button>
+          </div>
+        </div>
         <div class="hero-actions">
           <button type="button" class="button primary large" id="heroAction" data-action="connect">连接网易云音乐</button>
           <a class="scroll-cue" href="#timelineSection" id="scrollCue" hidden><span>往下翻，从<span id="scrollCueText">最近的一首</span>开始</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5"/></svg></a>
@@ -215,6 +224,7 @@
 
   <dialog id="capsuleDialog" class="capsule-sheet" aria-labelledby="capsuleTitle">
     <button type="button" class="dialog-close icon-button" id="closeCapsule" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <div class="capsule-ribbon" id="capsuleRibbon" aria-hidden="true"></div>
     <p class="kicker">音乐时光胶囊</p>
     <h2 id="capsuleTitle">回到某一次初听</h2>
     <div class="capsule-modes" role="tablist" aria-label="胶囊方式">
@@ -222,6 +232,37 @@
       <button type="button" id="capsuleRandomBtn" role="tab" aria-selected="false">随机回到过去</button>
     </div>
     <div id="capsuleBody" class="capsule-body"></div>
+  </dialog>
+
+
+  <dialog id="travelOverlay" class="travel" aria-labelledby="travelTitle" aria-modal="true">
+    <div class="travel-stage" id="travelStage">
+      <div class="travel-whoosh" aria-hidden="true"></div>
+      <div class="travel-tunnel" id="travelTunnel"></div>
+      <div class="travel-scan" aria-hidden="true"></div>
+      <div class="travel-clock" id="travelClock" aria-hidden="true">
+        <span class="travel-year" id="travelYear"></span>
+        <span class="travel-md"><span id="travelMonth"></span><i>.</i><span id="travelDay"></span></span>
+      </div>
+      <p class="travel-skip" id="travelSkip">点击或按 Esc 跳过</p>
+    </div>
+    <div class="travel-arrive" id="travelArrive" hidden>
+      <div class="arrive-bg" id="arriveBg" aria-hidden="true"></div>
+      <div class="arrive-veil" aria-hidden="true"></div>
+      <div class="arrive-inner">
+        <div class="arrive-art cover-tile" id="arriveArt"></div>
+        <p class="arrive-when" id="arriveWhen"></p>
+        <h2 class="arrive-name" id="travelTitle"></h2>
+        <p class="arrive-artists" id="arriveArtists"></p>
+        <p class="arrive-note" id="arriveNote" hidden></p>
+        <div class="arrive-around" id="arriveAround"></div>
+        <div class="arrive-actions">
+          <button type="button" class="button primary" id="arriveReroll">再穿越一次</button>
+          <button type="button" class="button ghost" id="arriveLocate">在时间线中查看</button>
+          <button type="button" class="text-button" id="arriveBack">回到现在</button>
+        </div>
+      </div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

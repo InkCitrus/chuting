@@ -19,13 +19,14 @@ const fallbackCopy = {
 const plain = line => String(line || '').replaceAll('*', '')
 const softRotate = (el, pool) => { if (el) el.textContent = plain((pool && pool[0]) || '') }
 const softClear = (el, text) => { if (el) el.textContent = text || '' }
-const softPlayer = () => ({ show() {}, play() {}, get current() { return null }, get playing() { return false }, setActions() {}, setOffline() {}, render() {} })
+const softPlayer = () => ({ show() {}, play() { return Promise.resolve({ ok: false, error: '', reason: '' }) }, unlock() {}, duck() { return Promise.resolve() }, get current() { return null }, get playing() { return false }, get note() { return '' }, setActions() {}, setOffline() {}, render() {} })
 
-const [copyMod, rotMod, playerMod, capsuleMod] = await Promise.all([
+const [copyMod, rotMod, playerMod, capsuleMod, travelMod] = await Promise.all([
   import('./copy.js').catch(() => null),
   import('./rotator.js').catch(() => null),
   import('./player.js').catch(() => null),
-  import('./capsule.js').catch(() => null)
+  import('./capsule.js').catch(() => null),
+  import('./travel.js').catch(() => null)
 ])
 const { taglines, timelineLedes, endTitles, WELCOME_LINES, SYNCING_LINES, LOADING_LINES, INTRO_TITLES, CLOSING_LINES, SYNCING_EMPTY } = copyMod || fallbackCopy
 const rotate = rotMod?.rotate || softRotate
@@ -35,6 +36,15 @@ const capsuleToday = capsuleMod?.capsuleToday
 const yearsAgoLabel = capsuleMod?.yearsAgoLabel || (n => n === 1 ? '去年' : `${n} 年前`)
 const capsuleNeighbors = capsuleMod?.neighbors || (() => [])
 const capsuleRandom = capsuleMod?.randomMoment || (events => events[0] || null)
+const sinceLabel = capsuleMod?.sinceLabel || (() => '')
+const TRAVEL_MS = travelMod?.TRAVEL_MS || 2600
+const TRAVEL_BACK_MS = travelMod?.TRAVEL_BACK_MS || 920
+const TRAVEL_REDUCED_MS = travelMod?.TRAVEL_REDUCED_MS || 340
+const easeOut = travelMod?.easeOut || (t => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3)
+const lerp = travelMod?.lerp || ((a, b, t) => a + (b - a) * t)
+const clockParts = travelMod?.clockParts || (ms => { const d = new Date(ms); return Number.isNaN(d.getTime()) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() } })
+const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 24) => (target ? [target] : []).concat(events || []).slice(0, limit))
+const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: 0, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0 }))
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -339,6 +349,7 @@ function renderStatus() {
     $('scrollCue').hidden = false
     $('scrollCueText').textContent = state.order === 'newest' ? '最近的一首' : '最早的一首'
   }
+  renderHeroCapsule()
 
   const line = $('syncLine')
   line.hidden = !has || (!run && !stats.discovered)
@@ -867,6 +878,7 @@ function locateInTimeline(event) {
     el.addEventListener('animationend', clear, { once: true })
     setTimeout(clear, 2400)
   }
+  if (travel.open) finishTravel({ fromPop: false })
   const open = ['songDialog', 'capsuleDialog'].map($).filter(d => d?.open)
   if (open.length) {
     for (const d of open) closeDialog(d)
@@ -875,7 +887,44 @@ function locateInTimeline(event) {
 }
 
 /* ---------- 音乐时光胶囊 ---------- */
-const capsule = { mode: 'today', lastRandom: null }
+const capsule = { mode: 'today', lastRandom: null, todayPick: null }
+function renderHeroCapsule() {
+  const box = $('heroCapsule')
+  if (!box) return
+  const ready = !state.loading && state.all.length > 0
+  box.hidden = !ready
+  if (!ready) return
+  const result = capsuleToday ? capsuleToday(state.all) : { kind: 'empty', songs: [], nearest: null }
+  const line = $('heroCapsuleLine')
+  const todayBtn = $('heroTravelToday')
+  capsule.todayPick = null
+  if (result.kind === 'today' && result.songs.length) {
+    const n = result.songs.length
+    const first = result.songs[0].event
+    line.textContent = n === 1 ? `历史上的今天，你遇见了《${first.name}》` : `历史上的今天，往年遇见过 ${n} 首`
+    if (todayBtn) todayBtn.hidden = false
+    capsule.todayPick = first
+  } else if (result.nearest?.songs?.length) {
+    line.textContent = `往年的今天还是空白。最靠近的是 ${result.nearest.m} 月 ${result.nearest.d} 日`
+    if (todayBtn) todayBtn.hidden = false
+    capsule.todayPick = result.nearest.songs[0].event
+  } else {
+    line.textContent = '往年的今天，还没有记下初听'
+    if (todayBtn) todayBtn.hidden = true
+  }
+}
+function paintCapsuleRibbon() {
+  const ribbon = $('capsuleRibbon')
+  if (!ribbon) return
+  ribbon.replaceChildren()
+  const seen = new Set()
+  for (const e of state.all) {
+    if (!e.cover || seen.has(e.cover)) continue
+    seen.add(e.cover)
+    ribbon.append(tile(e, 'capsule-film', 80, false))
+    if (seen.size >= 10) break
+  }
+}
 function openCapsule(mode = 'today') {
   if (!state.all.length) { toast('还没有可以回顾的初听'); return }
   capsule.mode = mode === 'random' ? 'random' : 'today'
@@ -888,6 +937,7 @@ function renderCapsule() {
   const isToday = capsule.mode === 'today'
   todayBtn.setAttribute('aria-selected', String(isToday))
   randomBtn.setAttribute('aria-selected', String(!isToday))
+  paintCapsuleRibbon()
   body.replaceChildren()
   if (isToday) renderCapsuleToday(body)
   else renderCapsuleRandom(body)
@@ -903,10 +953,7 @@ function capsuleSongButton(entry, extraClass = '') {
   text.append(node('b', '', event.name), node('small', '', event.artists || '歌手未知'))
   button.append(cover, text)
   if (entry.yearsAgo) button.append(node('em', 'capsule-ago', yearsAgoLabel(entry.yearsAgo)))
-  button.addEventListener('click', () => {
-    closeDialog($('capsuleDialog'))
-    setTimeout(() => showSong(event, button), motion ? 220 : 0)
-  })
+  button.addEventListener('click', () => startTravel(event, { source: 'today' }))
   return button
 }
 function renderCapsuleToday(body) {
@@ -945,38 +992,241 @@ function renderCapsuleToday(body) {
   body.append(retry)
 }
 function renderCapsuleRandom(body) {
-  const event = capsuleRandom(state.all, Math.random, capsule.lastRandom)
-  if (!event) { body.append(node('p', 'capsule-lede', '还没有可以回顾的初听。')); return }
-  capsule.lastRandom = event.song_id
-  const when = `${dayLabel(event.date, true)} ${event.time}`
-  const featured = node('button', 'capsule-featured')
-  featured.type = 'button'
-  const cover = tile(event, 'capsule-cover is-lg', 240, true)
-  cover.setAttribute('aria-hidden', 'true')
-  const text = node('span', 'capsule-featured-text')
-  text.append(node('span', 'capsule-kicker', when), node('b', '', event.name), node('small', '', event.artists || '歌手未知'))
-  featured.append(cover, text)
-  featured.addEventListener('click', () => {
-    closeDialog($('capsuleDialog'))
-    setTimeout(() => showSong(event, featured), motion ? 220 : 0)
+  if (!state.all.length) { body.append(node('p', 'capsule-lede', '还没有可以回顾的初听。')); return }
+  const lede = node('p', 'capsule-lede', '随便抽一个第一次。也许是很久以前，也许就在上个月。')
+  const hint = node('p', 'capsule-hint', '封面会带着你穿越回去，歌也会一起响起来。')
+  const go = node('button', 'button primary', '开始穿越')
+  go.type = 'button'
+  go.addEventListener('click', () => {
+    const event = capsuleRandom(state.all, Math.random, capsule.lastRandom)
+    if (!event) return
+    capsule.lastRandom = event.song_id
+    startTravel(event, { source: 'random' })
   })
-  featured.style.setProperty('--i', 0)
-  body.append(featured)
-  const around = capsuleNeighbors(state.all, event, { days: 3, limit: 4 })
-  if (around.length) {
-    body.append(node('p', 'capsule-hint', '那时前后，你还初听了'))
-    const list = node('div', 'capsule-list')
-    around.forEach((item, i) => {
-      const row = capsuleSongButton(item)
-      row.style.setProperty('--i', i + 1)
-      list.append(row)
-    })
-    body.append(list)
+  body.append(lede, hint, go)
+}
+
+
+/* ---------- 时空穿梭 ---------- */
+const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null }
+function dismissCapsuleForTravel() {
+  const d = $('capsuleDialog')
+  if (!d?.open) return
+  d.classList.remove('is-closing')
+  d.close()
+  if (history.state?.chutingModal === 'capsuleDialog') {
+    history.replaceState({ chutingModal: 'travelOverlay' }, '')
+    modalLayer.id = 'travelOverlay'
   }
-  const again = node('button', 'button ghost', '再随机一次')
-  again.type = 'button'
-  again.addEventListener('click', () => renderCapsule())
-  body.append(again)
+}
+function paintTravelClock(ms) {
+  const parts = clockParts(ms)
+  if (!parts) return
+  if ($('travelYear')) $('travelYear').textContent = String(parts.y)
+  if ($('travelMonth')) $('travelMonth').textContent = String(parts.m).padStart(2, '0')
+  if ($('travelDay')) $('travelDay').textContent = String(parts.d).padStart(2, '0')
+}
+function poseTravelCards(t, reverse = false) {
+  const cards = $('travelTunnel')?.children || []
+  const n = cards.length
+  for (let i = 0; i < n; i++) {
+    const pose = cardPose(i, n, t, reverse)
+    cards[i].style.opacity = String(pose.opacity)
+    cards[i].style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateZ(${pose.rotate}deg)`
+  }
+}
+function buildTravelTunnel(target) {
+  const tunnel = $('travelTunnel')
+  if (!tunnel) return 0
+  tunnel.replaceChildren()
+  const covers = pickTravelCovers(state.all, target, 24)
+  for (const e of covers) tunnel.append(tile(e, 'travel-card', 160, true))
+  return covers.length
+}
+function paintArriveNote(result) {
+  const note = $('arriveNote')
+  if (!note) return
+  if (!result) return
+  if (result.ok) { note.hidden = true; note.textContent = ''; return }
+  const reason = result.reason || ''
+  const raw = result.error || player?.note || ''
+  const msg = reason === 'login' || raw === '扫码登录后就能听。'
+    ? '扫码登录后，穿越时会把歌一起带上。'
+    : reason === 'offline' || raw === '没网，先不放歌了。'
+      ? '没网，先不放歌了。'
+      : raw || '这次没能把歌一起带回来。'
+  note.textContent = msg
+  note.hidden = !msg
+}
+function showArrival(event) {
+  if (!event) return
+  const overlay = $('travelOverlay')
+  overlay?.classList.add('is-arrive')
+  overlay?.classList.remove('is-going')
+  const box = $('travelArrive')
+  if (box) box.hidden = false
+  const bg = $('arriveBg')
+  if (bg) {
+    bg.replaceChildren()
+    if (event.cover) {
+      const img = new Image()
+      img.alt = ''
+      img.src = coverSize(event.cover, 240)
+      bg.append(img)
+    }
+  }
+  const art = $('arriveArt')
+  if (art) {
+    const next = tile(event, 'arrive-art cover-tile', 400, true)
+    next.id = 'arriveArt'
+    art.replaceWith(next)
+  }
+  const when = `${dayLabel(event.date, true)}${event.time ? ` ${event.time}` : ''}`
+  const since = sinceLabel(event.first_listen_ms)
+  if ($('arriveWhen')) $('arriveWhen').textContent = since ? `${when} · ${since}` : when
+  if ($('travelTitle')) $('travelTitle').textContent = event.name
+  if ($('arriveArtists')) $('arriveArtists').textContent = event.artists || '歌手未知'
+  if (travel.play && typeof travel.play.then === 'function') {
+    travel.play.then(result => { if (travel.event === event) paintArriveNote(result) })
+  } else if (player?.note) paintArriveNote({ ok: false, error: player.note })
+  else paintArriveNote({ ok: Boolean(player?.playing && player?.current?.song_id === event.song_id) })
+  const around = $('arriveAround')
+  if (around) {
+    around.replaceChildren()
+    const near = capsuleNeighbors(state.all, event, { days: 3, limit: 4 })
+    if (near.length) {
+      around.append(node('p', 'arrive-around-label', '那时前后，你还初听了'))
+      const list = node('div', 'arrive-around-list')
+      near.forEach(item => {
+        const btn = node('button', 'arrive-chip')
+        btn.type = 'button'
+        btn.append(tile(item, 'arrive-chip-cover', 72, false), node('span', '', item.name))
+        btn.addEventListener('click', () => startTravel(item, { source: 'neighbor' }))
+        list.append(btn)
+      })
+      around.append(list)
+    }
+  }
+  queueMicrotask(() => { try { $('arriveReroll')?.focus() } catch {} })
+}
+function finishGoing() {
+  travel.phase = 'arrive'
+  paintTravelClock(travel.toMs)
+  poseTravelCards(1, false)
+  showArrival(travel.event)
+}
+function skipTravel() {
+  if (travel.phase !== 'going') return
+  cancelAnimationFrame(travel.raf)
+  finishGoing()
+}
+function startTravel(event, { source = 'random' } = {}) {
+  if (!event) return
+  dismissCapsuleForTravel()
+  const continuing = travel.open && travel.event
+  travel.event = event
+  travel.source = source
+  travel.open = true
+  travel.phase = 'going'
+  travel.fromMs = continuing ? (continuing.first_listen_ms || Date.now()) : Date.now()
+  travel.toMs = event.first_listen_ms || travel.fromMs
+  const quiet = reduced.matches || !motion
+  travel.duration = quiet ? TRAVEL_REDUCED_MS : TRAVEL_MS
+  document.body.classList.add('has-travel')
+  const overlay = $('travelOverlay')
+  if ($('travelArrive')) $('travelArrive').hidden = true
+  if ($('travelStage')) { $('travelStage').hidden = quiet; $('travelStage').classList.toggle('is-reduced', quiet) }
+  overlay?.classList.toggle('is-arrive', false)
+  overlay?.classList.toggle('is-going', !quiet)
+  if (!quiet) {
+    buildTravelTunnel(event)
+    poseTravelCards(0, false)
+    paintTravelClock(travel.fromMs)
+  } else {
+    $('travelTunnel')?.replaceChildren()
+    paintTravelClock(travel.toMs)
+  }
+  if (overlay && !overlay.open) openModal(overlay)
+  player?.unlock?.()
+  const same = player?.current?.song_id === event.song_id && player?.playing
+  if (!same) {
+    player?.duck?.(240)
+    travel.play = player?.play?.(event, { fadeIn: 1600 })
+    if (travel.play?.then) travel.play.then(result => { if (travel.event === event && travel.phase === 'arrive') paintArriveNote(result) })
+  } else {
+    travel.play = Promise.resolve({ ok: true })
+  }
+  cancelAnimationFrame(travel.raf)
+  if (quiet) { finishGoing(); return }
+  travel.start = performance.now()
+  const tick = now => {
+    const raw = Math.min(1, (now - travel.start) / travel.duration)
+    const t = easeOut(raw)
+    poseTravelCards(t, false)
+    paintTravelClock(lerp(travel.fromMs, travel.toMs, t))
+    if (raw < 1 && travel.phase === 'going') travel.raf = requestAnimationFrame(tick)
+    else if (travel.phase === 'going') finishGoing()
+  }
+  travel.raf = requestAnimationFrame(tick)
+}
+function rerollTravel() {
+  let next = null
+  if (travel.source === 'today') {
+    const result = capsuleToday?.(state.all)
+    const songs = (result?.kind === 'today' ? result.songs : result?.nearest?.songs) || []
+    const ids = songs.map(s => (s.event || s).song_id)
+    const idx = ids.indexOf(travel.event?.song_id)
+    const pick = songs.length ? songs[(Math.max(idx, 0) + 1) % songs.length] : null
+    next = pick ? (pick.event || pick) : null
+    if (next?.song_id === travel.event?.song_id) next = null
+  }
+  if (!next) next = capsuleRandom(state.all, Math.random, travel.event?.song_id)
+  if (next) startTravel(next, { source: travel.source === 'today' && next ? travel.source : 'random' })
+}
+function returnToPresent({ fromPop = false } = {}) {
+  if (!travel.open) {
+    if ($('travelOverlay')?.open) finishTravel({ fromPop })
+    return
+  }
+  cancelAnimationFrame(travel.raf)
+  const canRewind = motion && !reduced.matches && travel.phase === 'arrive' && !fromPop
+  if (canRewind) {
+    travel.phase = 'back'
+    if ($('travelArrive')) $('travelArrive').hidden = true
+    $('travelOverlay')?.classList.remove('is-arrive')
+    $('travelOverlay')?.classList.add('is-going')
+    if (!$('travelTunnel')?.children.length) buildTravelTunnel(travel.event)
+    travel.duration = TRAVEL_BACK_MS
+    travel.start = performance.now()
+    const from = travel.toMs, to = Date.now()
+    const tick = now => {
+      const raw = Math.min(1, (now - travel.start) / travel.duration)
+      const t = easeOut(raw)
+      poseTravelCards(t, true)
+      paintTravelClock(lerp(from, to, t))
+      if (raw < 1 && travel.phase === 'back') travel.raf = requestAnimationFrame(tick)
+      else if (travel.phase === 'back') finishTravel({ fromPop })
+    }
+    travel.raf = requestAnimationFrame(tick)
+    return
+  }
+  finishTravel({ fromPop })
+}
+function finishTravel({ fromPop = false } = {}) {
+  cancelAnimationFrame(travel.raf)
+  const overlay = $('travelOverlay')
+  travel.phase = ''
+  travel.open = false
+  document.body.classList.remove('has-travel')
+  overlay?.classList.remove('is-arrive', 'is-going', 'is-closing')
+  if (overlay?.open) overlay.close()
+  if (!fromPop && history.state?.chutingModal === 'travelOverlay') {
+    modalLayer.fromPop = true
+    history.back()
+  }
+  if (modalLayer.id === 'travelOverlay') modalLayer.id = null
+  $('travelTunnel')?.replaceChildren()
+  player?.render()
 }
 
 /* ---------- 弹窗 ---------- */
@@ -987,6 +1237,11 @@ function syncSettingsExpanded() {
   if (btn) btn.setAttribute('aria-expanded', String(Boolean($('settingsDialog')?.open)))
 }
 function closeDialog(dialog, { fromPop = false } = {}) {
+  if (dialog?.id === 'travelOverlay') {
+    if (travel.phase === 'going') { skipTravel(); return }
+    returnToPresent({ fromPop })
+    return
+  }
   if (!dialog?.open || modalLayer.closing) return
   modalLayer.closing = true
   const afterClose = () => {
@@ -1357,6 +1612,22 @@ $('closeCapsule')?.addEventListener('click', () => closeDialog($('capsuleDialog'
 $('capsuleButton')?.addEventListener('click', () => openCapsule('today'))
 $('capsuleTodayBtn')?.addEventListener('click', () => { capsule.mode = 'today'; renderCapsule() })
 $('capsuleRandomBtn')?.addEventListener('click', () => { capsule.mode = 'random'; renderCapsule() })
+$('heroTravelToday')?.addEventListener('click', () => startTravel(capsule.todayPick, { source: 'today' }))
+$('heroTravelRandom')?.addEventListener('click', () => {
+  const event = capsuleRandom(state.all, Math.random, capsule.lastRandom)
+  if (!event) { toast('还没有可以回顾的初听'); return }
+  capsule.lastRandom = event.song_id
+  startTravel(event, { source: 'random' })
+})
+$('arriveReroll')?.addEventListener('click', rerollTravel)
+$('arriveLocate')?.addEventListener('click', () => locateInTimeline(travel.event))
+$('arriveBack')?.addEventListener('click', () => returnToPresent())
+$('travelOverlay')?.addEventListener('cancel', e => {
+  e.preventDefault()
+  if (travel.phase === 'going') skipTravel()
+  else returnToPresent()
+})
+$('travelStage')?.addEventListener('click', () => { if (travel.phase === 'going') skipTravel() })
 $('locateBtn')?.addEventListener('click', () => locateInTimeline(state.view[state.current] || player?.current))
 $('miniLocate')?.addEventListener('click', () => locateInTimeline(player?.current))
 $('prevSong').addEventListener('click', () => stepSong(-1))

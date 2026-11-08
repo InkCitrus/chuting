@@ -85,3 +85,20 @@ export function randomMoment(events, rng = Math.random, exceptId = null) {
   const index = Math.min(list.length - 1, Math.max(0, Math.floor((Number.isFinite(n) ? n : 0) * list.length)))
   return list[index] || null
 }
+
+export function sinceLabel(thenMs, now = new Date()) {
+  const a = new Date(thenMs), b = now instanceof Date ? now : new Date(now)
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return ''
+  let months = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
+  if (b.getDate() < a.getDate()) months -= 1
+  if (months < 1) {
+    const days = Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000))
+    if (days <= 0) return '今天'
+    if (days === 1) return '昨天'
+    return `${days} 天前`
+  }
+  const years = Math.floor(months / 12), rem = months % 12
+  if (!years) return `${rem} 个月前`
+  if (!rem) return years === 1 ? '1 年前' : `${years} 年前`
+  return `${years} 年 ${rem} 个月前`
+}
