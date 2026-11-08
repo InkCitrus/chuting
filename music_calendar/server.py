@@ -112,7 +112,7 @@ def make_handler(app):
                         return self.send(200, "\ufeff" + output.getvalue(), "text/csv; charset=utf-8", "first-listens.csv")
                     return self.send(200, {"account": account, "kind": "first_listen", "timezone": "Asia/Shanghai", "coverage": app.store.stats(account["uid"]), "events": records}, filename="first-listens.json")
                 files = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/styles.css": ("styles.css", "text/css; charset=utf-8")}
-                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js", "insights.js", "rotator.js", "copy.js", "player.js"):
+                for name in ("backend.js", "archive-core.js", "browser-store.js", "browser-sync.js", "insights.js", "share.js", "rotator.js", "copy.js", "player.js", "theme.js"):
                     files["/" + name] = (name, "text/javascript; charset=utf-8")
                 files["/favicon.svg"] = ("favicon.svg", "image/svg+xml")
                 files["/manifest.webmanifest"] = ("manifest.webmanifest", "application/manifest+json")

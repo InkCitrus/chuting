@@ -866,6 +866,16 @@ dialog::backdrop { background: rgb(14 11 8 / .46); backdrop-filter: none; -webki
 body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 @media (max-width: 700px) { .player { grid-template-columns: auto minmax(0, 1fr); gap: 12px } }
 
+/* ---------- 顶栏 GitHub / 分享海报 ---------- */
+.github svg { width: 16px; height: 16px; fill: currentColor; stroke: none }
+#shareDialog { width: min(460px, calc(100% - 28px)); overflow: auto }
+.share-stage { display: grid; place-items: center; background: #0c0b09; border-radius: 18px; padding: 12px; min-height: 160px }
+.share-canvas { display: block; width: min(100%, 280px); height: auto; aspect-ratio: 9 / 16; border-radius: 8px; box-shadow: 0 18px 40px rgb(0 0 0 / .4) }
+.share-status { margin: 12px 0 0; color: var(--muted); font-size: 13px; text-align: center }
+.share-status[hidden] { display: none }
+.share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px }
+.share-actions .button { flex: 1 1 auto }
+
 /* 定位：在时间线里轻轻圈出正在听的那一首，只用描边和缩放 */
 .song.is-locate {
   background: color-mix(in srgb, var(--surface) 90%, transparent);

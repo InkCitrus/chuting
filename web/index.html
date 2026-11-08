@@ -22,6 +22,7 @@
   <link rel="modulepreload" href="/browser-sync.js">
   <link rel="modulepreload" href="/archive-core.js">
   <link rel="modulepreload" href="/insights.js">
+  <link rel="modulepreload" href="/share.js">
   <link rel="modulepreload" href="/rotator.js">
   <link rel="modulepreload" href="/copy.js">
   <link rel="modulepreload" href="/player.js">
@@ -43,6 +44,8 @@
       <div class="bar-actions">
         <span id="accountLabel" class="account-label" hidden><img id="accountAvatar" class="account-chip-avatar" alt="" hidden referrerpolicy="no-referrer" decoding="async"><span id="accountName"></span></span>
         <button type="button" class="button primary" id="barAction">连接网易云</button>
+        <button type="button" class="icon-button" id="shareButton" aria-label="分享初听海报" aria-haspopup="dialog" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.2V2.6M5.3 5.1 8 2.4l2.7 2.7"/><path d="M3.4 8.2V12a1 1 0 0 0 1 1h7.2a1 1 0 0 0 1-1V8.2"/></svg></button>
+        <a class="icon-button github" href="https://github.com/InkCitrus/chuting" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 上查看初听，在新标签页打开"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
         <button type="button" class="icon-button gear" id="settingsButton" aria-label="设置" aria-haspopup="dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M8.15 2.6h3.7l.42 1.55c.55.16 1.07.4 1.54.72l1.5-.55 1.85 1.85-.55 1.5c.32.47.56.99.72 1.54L19.4 8.15v3.7l-1.55.42a6.1 6.1 0 0 1-.72 1.54l.55 1.5-1.85 1.85-1.5-.55a6.1 6.1 0 0 1-1.54.72l-.42 1.55H8.15l-.42-1.55a6.1 6.1 0 0 1-1.54-.72l-1.5.55-1.85-1.85.55-1.5a6.1 6.1 0 0 1-.72-1.54L.6 11.85v-3.7l1.55-.42c.16-.55.4-1.07.72-1.54l-.55-1.5L4.17 2.84l1.5.55c.47-.32.99-.56 1.54-.72z"/></svg></button>
       </div>
     </div>
@@ -183,6 +186,20 @@
       <h3 id="setOfflineTitle">离线</h3>
       <p class="set-note" id="offlineNote">离线版准备中…</p>
     </section>
+  </dialog>
+
+  <dialog id="shareDialog" aria-labelledby="shareTitle">
+    <button type="button" class="dialog-close icon-button" id="closeShare" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <p class="kicker">分享</p>
+    <h2 id="shareTitle">初听海报</h2>
+    <p class="dialog-copy">画在这台设备上。没有链接，也不会上传。</p>
+    <div class="share-stage" id="shareStage" aria-busy="false"></div>
+    <p id="shareStatus" class="share-status" role="status">正在排版海报…</p>
+    <div class="share-actions">
+      <button type="button" class="button primary" id="shareSave" disabled>保存图片</button>
+      <button type="button" class="button ghost" id="shareNative" hidden>分享</button>
+      <button type="button" class="button ghost" id="shareCopy">复制文字</button>
+    </div>
   </dialog>
 
   <dialog id="loginDialog" aria-labelledby="loginTitle">
