@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, pickTravelCovers, fillTravelWall, cardPose, heroPose, TRAVEL_MAX_COVERS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -32,6 +32,19 @@ test('clock parts and lerp walk backward through a date', () => {
   assert.equal(formatClock(parts), '2025.04.13')
 })
 
+test('formatTravelMeta counts down toward the destination', () => {
+  const to = Date.parse('2024-11-08T00:00:00+09:00')
+  const from = Date.parse('2026-11-08T00:00:00+09:00')
+  assert.equal(formatTravelMeta(from, to), `T−${Math.round((from - to) / 86400000)}`)
+  assert.equal(formatTravelMeta(to, to), 'T−0')
+})
+
+test('travelFx peaks around the midpoint', () => {
+  assert.ok(travelFx(0.5).flash > travelFx(0.2).flash)
+  assert.ok(travelFx(0.5).flash > travelFx(0.8).flash)
+  assert.ok(travelFx(0.48).streaks > travelFx(0.1).streaks)
+})
+
 test('pickTravelCovers keeps the target and stays within the cap', () => {
   const events = Array.from({ length: 40 }, (_, i) => ({ song_id: String(i), cover: i % 2 ? `c${i}` : '', name: `s${i}` }))
   const target = events[7]
@@ -61,23 +74,30 @@ test('fillTravelWall repeats a short decoded set instead of inventing blanks', (
   assert.equal(wall.length, 18)
   assert.ok(wall.every(item => item.cover))
   assert.equal(fillTravelWall([], 18).length, 0)
+  assert.equal(fillTravelWall(few, TRAVEL_TILES).length, TRAVEL_TILES)
+  assert.ok(TRAVEL_TILES <= 80)
 })
 
-test('card poses sit on opposite walls and rush toward the camera', () => {
-  const project = pose => pose.x * 1000 / (1000 - Math.min(pose.z, 920))
-  const left = cardPose(0, 10, 0)
-  const right = cardPose(1, 10, 0)
-  assert.ok(left.x * right.x < 0)
-  assert.ok(Math.abs(left.x) > 200)
-  const later = cardPose(0, 10, 1)
-  assert.ok(later.z > left.z)
-  assert.ok(later.opacity <= left.opacity || later.z < 260)
-  const far = cardPose(0, 10, 0)
-  const midNear = cardPose(4, 10, 0.5)
-  assert.ok(Math.abs(project(far)) > 220, 'far covers stay outside the date')
-  assert.ok(Math.abs(project(far)) < Math.abs(project(midNear)), 'near covers swing wider')
-  assert.ok(far.brightness < midNear.brightness)
-  assert.ok(far.blur >= midNear.blur)
+test('card poses tile four tunnel faces and stream toward the camera', () => {
+  const n = TRAVEL_TILES
+  const faces = new Set()
+  const zs = []
+  for (let i = 0; i < n; i++) {
+    const pose = cardPose(i, n, 0)
+    faces.add(pose.face)
+    zs.push(pose.z)
+    assert.equal(tileLayout(i, n).face, pose.face)
+  }
+  assert.equal(faces.size, 4)
+  assert.ok(faces.has(0) && faces.has(1) && faces.has(2) && faces.has(3))
+  const left = cardPose(0, n, 0)
+  const right = cardPose(4, n, 0)
+  assert.ok(left.x < 0 && right.x > 0)
+  const far = cardPose(0, n, 0)
+  const moved = cardPose(0, n, 0.35)
+  assert.ok(moved.z !== far.z)
+  const byZ = [...Array(n)].map((_, i) => cardPose(i, n, 0.2)).sort((a, b) => a.z - b.z)
+  assert.ok(byZ[0].brightness <= byZ.at(-1).brightness)
 })
 
 test('hero cover stays hidden until late, then grows out of the vanishing point', () => {

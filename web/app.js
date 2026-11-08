@@ -48,8 +48,10 @@ const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit 
 const fillTravelWall = travelMod?.fillTravelWall || (items => items || [])
 const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 400, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0, scale: 1, blur: 0, brightness: 1 }))
 const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
-const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 240
-const TRAVEL_WALL = travelMod?.TRAVEL_WALL || 10
+const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 0, bloom: 0.4 }))
+const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
+const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
+const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -1047,6 +1049,7 @@ function paintTravelClock(ms, force = false) {
   const parts = clockParts(ms)
   if (!parts) return
   if ($('travelYear')) $('travelYear').textContent = String(parts.y)
+  if ($('travelMeta')) $('travelMeta').textContent = formatTravelMeta(ms, travel.toMs)
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
   if (!force && travel.clockAt && now - travel.clockAt < 72) return
   travel.clockAt = now
@@ -1056,7 +1059,9 @@ function paintTravelClock(ms, force = false) {
 function applyCardPose(el, pose) {
   if (!el) return
   el.style.opacity = String(pose.opacity)
-  el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) scale(${pose.scale || 1})`
+  const rx = pose.rotateX || 0
+  const ry = pose.rotateY || 0
+  el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${pose.scale || 1})`
   const filters = []
   if (pose.brightness != null && pose.brightness < 0.995) filters.push(`brightness(${pose.brightness.toFixed(3)})`)
   if (pose.blur) filters.push(`blur(${pose.blur.toFixed(2)}px)`)
@@ -1067,14 +1072,81 @@ function applyCardPose(el, pose) {
 function poseTravelCards(t, reverse = false) {
   const cards = $('travelTunnel')?.children || []
   const n = cards.length
-  for (let i = 0; i < n; i++) applyCardPose(cards[i], cardPose(i, n, t, reverse))
+  let pass = '', passZ = -Infinity
+  for (let i = 0; i < n; i++) {
+    const pose = cardPose(i, n, t, reverse)
+    applyCardPose(cards[i], pose)
+    if (pose.opacity > 0.55 && pose.z > passZ && cards[i].dataset.name) {
+      passZ = pose.z
+      pass = [cards[i].dataset.name, cards[i].dataset.artists].filter(Boolean).join(' · ')
+    }
+  }
   const hero = $('travelHero')
   if (hero) applyCardPose(hero, heroPose(t, reverse))
   const clock = $('travelClock')
   if (clock) {
-    const fade = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.22)
+    const fade = t < 0.72 ? 1 : Math.max(0, 1 - (t - 0.72) / 0.2)
     clock.style.opacity = String(reverse ? Math.min(1, t * 1.4) : fade)
   }
+  const line = $('travelPass')
+  if (line && t > 0.05 && t < 0.82 && pass) line.textContent = pass
+  const bar = $('travelBar')
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, (reverse ? 1 - t : t) * 100)).toFixed(1)}%`
+  const fx = reverse ? { flash: 0, streaks: 0, chroma: 0, bloom: 0.35 } : travelFx(t)
+  if ($('travelFlash')) $('travelFlash').style.opacity = fx.flash.toFixed(3)
+  if ($('travelStreaks')) $('travelStreaks').style.opacity = fx.streaks.toFixed(3)
+  if ($('travelChroma')) $('travelChroma').style.opacity = fx.chroma.toFixed(3)
+  if ($('travelBloom')) $('travelBloom').style.opacity = fx.bloom.toFixed(3)
+}
+function applyTravelGlow(event) {
+  const overlay = $('travelOverlay')
+  if (!overlay) return
+  let rgb = '208 132 64'
+  const imgs = []
+  const seen = new Set()
+  const target = event?.cover && travelArts.get(event.cover)
+  if (target) { imgs.push(target); seen.add(target) }
+  for (const img of travelArts.values()) {
+    if (seen.has(img) || !img?.naturalWidth) continue
+    imgs.push(img)
+    if (imgs.length >= 8) break
+  }
+  try {
+    const c = document.createElement('canvas')
+    c.width = 10
+    c.height = 10
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    let r = 0, g = 0, b = 0, w = 0
+    imgs.forEach((img, index) => {
+      ctx.clearRect(0, 0, 10, 10)
+      ctx.drawImage(img, 0, 0, 10, 10)
+      const data = ctx.getImageData(0, 0, 10, 10).data
+      const face = index === 0 ? 1.15 : 1
+      for (let i = 0; i < data.length; i += 4) {
+        const rr = data[i], gg = data[i + 1], bb = data[i + 2]
+        const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb)
+        const sat = max ? (max - min) / max : 0
+        if (max < 40) continue
+        const wt = (0.15 + sat * 2.4) * face
+        r += rr * wt; g += gg * wt; b += bb * wt; w += wt
+      }
+    })
+    if (w) {
+      r /= w; g /= w; b /= w
+      const max = Math.max(r, g, b), min = Math.min(r, g, b)
+      const sat = max ? (max - min) / max : 0
+      if (sat < 0.36 && max) {
+        const avg = (r + g + b) / 3
+        const punch = (0.42 - sat) * 2.2
+        r += (r - avg) * punch
+        g += (g - avg) * punch
+        b += (b - avg) * punch
+      }
+      rgb = `${Math.max(0, Math.min(255, Math.round(r)))} ${Math.max(0, Math.min(255, Math.round(g)))} ${Math.max(0, Math.min(255, Math.round(b)))}`
+    }
+  } catch {}
+  overlay.style.setProperty('--travel-glow', rgb)
+  $('travelStage')?.style.setProperty('--travel-glow', rgb)
 }
 const travelArts = new Map()
 function clonedArt(img, className = '') {
@@ -1139,10 +1211,12 @@ async function collectTunnelArts(target) {
     await Promise.race([settle, new Promise(r => setTimeout(r, 280))])
     ready = readyTravelArts(picked)
   }
-  return fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_WALL)
+  return fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
 }
 function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
+  if (art?.event?.name) card.dataset.name = art.event.name
+  if (art?.event?.artists) card.dataset.artists = art.event.artists
   card.append(clonedArt(art.img, 'travel-card-art'))
   return card
 }
@@ -1162,8 +1236,8 @@ function buildTravelTunnel(target, arts) {
   if (!tunnel) return 0
   tunnel.replaceChildren()
   const ready = arts && arts.length ? arts : readyTravelArts(pickTravelCovers(state.all, target, 24))
-  const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_WALL)
-  const list = walls.length ? walls : fillTravelWall(ready, TRAVEL_WALL)
+  const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
+  const list = walls.length ? walls : fillTravelWall(ready, TRAVEL_TILES)
   if (!list.length) {
     for (const e of pickTravelCovers(state.all, target, 8)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
   } else {
@@ -1307,6 +1381,7 @@ function beginTravelMotion(event, arts) {
   travel.phase = 'going'
   travel.clockAt = 0
   buildTravelTunnel(event, arts)
+  applyTravelGlow(event)
   if ($('travelClock')) $('travelClock').style.opacity = '1'
   poseTravelCards(0, false)
   paintTravelClock(travel.fromMs, true)
@@ -1356,7 +1431,7 @@ function startTravel(event, { source = 'random' } = {}) {
   cancelAnimationFrame(travel.raf)
   if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
-  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)).filter(a => a.event?.song_id !== event?.song_id), TRAVEL_WALL)
+  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)).filter(a => a.event?.song_id !== event?.song_id), TRAVEL_TILES)
   if (cached.length) beginTravelMotion(event, cached)
   else collectTunnelArts(event).then(arts => {
     if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
