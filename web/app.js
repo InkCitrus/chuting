@@ -960,8 +960,8 @@ function renderHeroCapsule() {
     line.textContent = `往年的今天还是空白。最靠近的是 ${result.nearest.m} 月 ${result.nearest.d} 日`
     if (todayBtn) {
       todayBtn.hidden = false
-      todayBtn.textContent = '去最近的那天'
-      todayBtn.title = '去最靠近今天的那个日子'
+      todayBtn.textContent = '去那年的今天'
+      todayBtn.title = '去往年里最靠近今天的那一天'
     }
     capsule.todayPick = result.nearest.songs[0].event
   } else {
