@@ -279,21 +279,23 @@
       </div>
       <p class="travel-skip" id="travelSkip">点击或按 Esc 跳过</p>
     </div>
-    <div class="travel-arrive" id="travelArrive" hidden>
+    <div class="travel-arrive" id="travelArrive" tabindex="-1" hidden>
       <div class="arrive-bg" id="arriveBg" aria-hidden="true"></div>
       <div class="arrive-veil" aria-hidden="true"></div>
       <div class="arrive-inner">
         <div class="arrive-art" id="arriveArt"></div>
         <div class="arrive-copy">
-          <p class="arrive-when" id="arriveWhen"></p>
-          <h2 class="arrive-name" id="travelTitle"></h2>
-          <p class="arrive-artists" id="arriveArtists"></p>
+          <div class="arrive-head" id="arriveHead">
+            <p class="arrive-when"><span id="arriveWhen"></span><span class="arrive-since" id="arriveSince" hidden></span></p>
+            <h2 class="arrive-name" id="travelTitle"></h2>
+            <p class="arrive-artists" id="arriveArtists"></p>
+          </div>
           <p class="arrive-note" id="arriveNote" hidden></p>
           <div class="arrive-around" id="arriveAround"></div>
           <div class="arrive-actions">
-            <button type="button" class="button primary" id="arriveReroll">再穿越一次</button>
-            <button type="button" class="button ghost" id="arriveLocate">在时间线中查看</button>
-            <button type="button" class="text-button" id="arriveBack">回到现在</button>
+            <button type="button" class="arrive-act is-primary" id="arriveReroll"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>再穿越一次</button>
+            <button type="button" class="arrive-act" id="arriveLocate"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h6M3 12h8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>在时间线中查看</button>
+            <button type="button" class="arrive-act is-quiet" id="arriveBack">回到现在<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           </div>
         </div>
       </div>
