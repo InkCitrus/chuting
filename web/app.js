@@ -51,7 +51,9 @@ const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 4
 const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
 const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 0, bloom: 0.4 }))
 const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
-const travelStageLayout = travelMod?.travelStageLayout || ((w, h) => ({ portrait: Number(h) > Number(w), wallX: 470, wallY: 278, faceCounts: [4, 4, 6, 6], perspective: 900, spacing: 310, zMin: -1640 }))
+const travelStageLayout = travelMod?.travelStageLayout || ((w, h) => ({ portrait: Number(h) > Number(w), wallX: 470, wallY: 278, faceCounts: [4, 4, 6, 6], perspective: 900, spacing: 310, zMin: -1640, tiles: 120, coverPx: 200 }))
+const travelQuality = travelMod?.travelQuality || (() => 'full')
+const TRAVEL_BACK_PX = travelMod?.TRAVEL_BACK_PX || 32
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
 const TRAVEL_MAX_COVERS = travelMod?.TRAVEL_MAX_COVERS || 48
@@ -1144,7 +1146,7 @@ function renderCapsuleRandom(body) {
 
 
 /* ---------- 时空穿梭 ---------- */
-const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0, layout: null }
+const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0, layout: null, quality: 'full', frameBudget: [] }
 function dismissCapsuleForTravel() {
   const d = $('capsuleDialog')
   if (!d?.open) return
@@ -1208,22 +1210,38 @@ function applyCardPose(el, pose) {
 function setText(el, text) {
   if (el && el.textContent !== text) el.textContent = text
 }
+function detectTravelQuality() {
+  return travelQuality({
+    reducedMotion: reduced.matches,
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    deviceMemory: navigator.deviceMemory
+  })
+}
 function syncTravelStageLayout() {
   const stage = $('travelStage')
-  const layout = travelStageLayout(stage?.clientWidth || innerWidth || 1280, stage?.clientHeight || innerHeight || 800)
+  if (!travel.quality) travel.quality = detectTravelQuality()
+  const layout = travelStageLayout(stage?.clientWidth || innerWidth || 1280, stage?.clientHeight || innerHeight || 800, travel.quality)
   travel.layout = layout
   if (stage) {
     stage.style.setProperty('--travel-perspective', `${layout.perspective}px`)
     stage.classList.toggle('is-portrait', !!layout.portrait)
+    stage.classList.toggle('is-lite', layout.quality === 'lite')
   }
   return layout
+}
+function travelCoverPx() {
+  return (travel.layout || syncTravelStageLayout()).coverPx || TRAVEL_COVER_PX
+}
+function travelTileCount() {
+  return (travel.layout || syncTravelStageLayout()).tiles || TRAVEL_TILES
 }
 function paintTravelBack(event) {
   const img = $('travelBackImg')
   if (!img) return
-  const src = event?.cover && travelArts.get(event.cover)
-  if (!src) { img.hidden = true; return }
-  const url = src.currentSrc || src.src
+  const raw = event?.cover
+  if (!raw) { img.hidden = true; return }
+  // A 32px thumb stretched over the stage is the blur — no live CSS filter.
+  const url = coverSize(raw, TRAVEL_BACK_PX)
   if (img.getAttribute('src') !== url) img.src = url
   img.hidden = false
 }
@@ -1309,15 +1327,15 @@ function applyTravelGlow(event) {
 }
 const travelArts = new Map()
 function clonedArt(img, className = '', decoding = 'async') {
-  const next = new Image()
+  // Clone an already-decoded image so tiles paint immediately (new Image()+src can flash empty).
+  const next = img.cloneNode(true)
   next.alt = ''
   next.decoding = decoding
   next.referrerPolicy = 'no-referrer'
   if (className) next.className = className
-  next.src = img.currentSrc || img.src
   return next
 }
-function decodeTravelCover(url) {
+function decodeTravelCover(url, px = travelCoverPx()) {
   if (!url) return Promise.resolve(null)
   const cached = travelArts.get(url)
   if (cached?.naturalWidth > 0) return Promise.resolve(cached)
@@ -1325,7 +1343,7 @@ function decodeTravelCover(url) {
   img.decoding = 'async'
   img.referrerPolicy = 'no-referrer'
   img.crossOrigin = 'anonymous'
-  img.src = coverSize(url, TRAVEL_COVER_PX)
+  img.src = coverSize(url, px)
   return img.decode().then(() => {
     if (img.naturalWidth > 0) { travelArts.set(url, img); return img }
     return null
@@ -1333,7 +1351,7 @@ function decodeTravelCover(url) {
     const plain = new Image()
     plain.decoding = 'async'
     plain.referrerPolicy = 'no-referrer'
-    plain.src = coverSize(url, TRAVEL_COVER_PX)
+    plain.src = coverSize(url, px)
     return plain.decode().then(() => {
       if (plain.naturalWidth > 0) { travelArts.set(url, plain); return plain }
       return null
@@ -1365,13 +1383,27 @@ function readyTravelArts(picked) {
   return out
 }
 function gatherTravelArts(target, picked = tunnelCoverPick(target)) {
-  return fillTravelWall(readyTravelArts(picked).filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
+  return fillTravelWall(readyTravelArts(picked).filter(a => a.event?.song_id !== target?.song_id), travelTileCount())
 }
+function waitMs(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
 async function collectTunnelArts(target) {
   const picked = tunnelCoverPick(target)
-  const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover) : Promise.resolve(null))
-  await Promise.race([Promise.all(pending).catch(() => {}), new Promise(r => setTimeout(r, 900))])
-  return gatherTravelArts(target, picked)
+  const px = travelCoverPx()
+  if (target?.cover) decodeTravelCover(target.cover, px)
+  const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover, px) : Promise.resolve(null))
+  const want = Math.max(1, Math.min(12, picked.filter(e => e?.cover).length || 1))
+  await Promise.race([Promise.all(pending).catch(() => {}), waitMs(650)])
+  let ready = readyTravelArts(picked)
+  if (ready.length < want) {
+    await Promise.race([Promise.all(pending).catch(() => {}), waitMs(400)])
+    ready = readyTravelArts(picked)
+  }
+  if (!ready.length && target?.cover) {
+    const one = await decodeTravelCover(target.cover, px)
+    if (one) ready = [{ event: target, img: one }]
+  }
+  const others = ready.filter(a => a.event?.song_id !== target?.song_id)
+  return fillTravelWall(others.length ? others : ready, travelTileCount())
 }
 function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
@@ -1399,8 +1431,9 @@ function buildTravelTunnel(target, arts) {
   if (!tunnel) return 0
   tunnel.replaceChildren()
   const ready = arts && arts.length ? arts : readyTravelArts(tunnelCoverPick(target))
-  const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
-  const list = walls.length ? walls : fillTravelWall(ready, TRAVEL_TILES)
+  const want = travelTileCount()
+  const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), want)
+  const list = walls.length ? walls : fillTravelWall(ready, want)
   if (!list.length) {
     for (const e of pickTravelCovers(state.all, target, 8)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
   } else {
@@ -1672,10 +1705,26 @@ function beginTravelMotion(event, arts) {
   paintTravelClock(travel.fromMs, true)
   cancelAnimationFrame(travel.raf)
   travel.start = performance.now()
+  travel._lastTick = 0
   const tick = now => {
     const hold = Number(document.documentElement.dataset.travelHold)
     const raw = Number.isFinite(hold) ? Math.min(1, Math.max(0, hold)) : Math.min(1, (now - travel.start) / travel.duration)
     const t = easeTravel(raw)
+    if (!Number.isFinite(hold) && travel.quality === 'full') {
+      const samples = travel.frameBudget
+      if (travel._lastTick) samples.push(now - travel._lastTick)
+      travel._lastTick = now
+      // Ignore the opening hitch and one-off spikes so a capable desktop
+      // does not drop cinematic layers after a single slow frame.
+      if (samples.length === 24) {
+        const steady = samples.slice(4).filter(d => d < 80)
+        const avg = steady.length ? steady.reduce((a, b) => a + b, 0) / steady.length : 0
+        if (steady.length >= 12 && avg > 28 && travel.layout?.portrait) {
+          travel.quality = 'lite'
+          $('travelStage')?.classList.add('is-lite')
+        }
+      }
+    }
     poseTravelCards(t, false)
     paintTravelClock(lerp(travel.fromMs, travel.toMs, t), Number.isFinite(hold))
     if (Number.isFinite(hold) && travel.phase === 'going') { travel.raf = requestAnimationFrame(tick); return }
@@ -1693,6 +1742,9 @@ function startTravel(event, { source = 'random' } = {}) {
   travel.open = true
   travel.phase = 'waiting'
   travel.skips = 0
+  travel.quality = detectTravelQuality()
+  travel.frameBudget = []
+  syncTravelStageLayout()
   travel.fromMs = continuing ? (continuing.first_listen_ms || Date.now()) : Date.now()
   travel.toMs = event.first_listen_ms || travel.fromMs
   const quiet = reduced.matches || !motion

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, travelQuality, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -151,7 +151,11 @@ test('portrait stage layout pulls the tunnel walls into a phone frame', () => {
   assert.equal(phone.portrait, true)
   assert.ok(phone.wallX >= 128 && phone.wallX <= 178)
   assert.ok(phone.wallY > phone.wallX)
-  assert.deepEqual(phone.faceCounts, [6, 6, 4, 4])
+  assert.deepEqual(phone.faceCounts, [5, 5, 3, 3])
+  assert.ok(phone.tiles < 80)
+  assert.equal(phone.rotateY, 0)
+  assert.equal(phone.rotateX, 0)
+  assert.ok(phone.coverPx <= 120)
   assert.ok(phone.perspective < 900)
   assert.ok(phone.spacing < 310)
 
@@ -160,6 +164,10 @@ test('portrait stage layout pulls the tunnel walls into a phone frame', () => {
   assert.equal(wide.wallX, 470)
   assert.equal(wide.wallY, 278)
   assert.equal(wide.perspective, 900)
+  assert.ok(wide.tiles < TRAVEL_TILES)
+  assert.ok(wide.tiles >= 80)
+  assert.equal(wide.rotateY, 0)
+  assert.equal(wide.rotateX, 0)
 
   const n = TRAVEL_TILES
   const plain = cardPose(3, n, 0.2)
@@ -179,4 +187,14 @@ test('portrait stage layout pulls the tunnel walls into a phone frame', () => {
 
   const faces = new Set([...Array(n)].map((_, i) => cardPose(i, n, 0.15, false, phone).face))
   assert.equal(faces.size, 4)
+})
+
+test('travelQuality picks a lighter path on constrained devices', () => {
+  assert.equal(travelQuality({ reducedMotion: true }), 'reduced')
+  assert.equal(travelQuality({ hardwareConcurrency: 4, deviceMemory: 4 }), 'lite')
+  assert.equal(travelQuality({ hardwareConcurrency: 8, deviceMemory: 8 }), 'full')
+  const lite = travelStageLayout(390, 844, 'lite')
+  assert.ok(lite.tiles < travelStageLayout(390, 844, 'full').tiles)
+  assert.equal(lite.rotateY, 0)
+  assert.equal(lite.rotateX, 0)
 })
