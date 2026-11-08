@@ -1,7 +1,7 @@
 'use strict'
 import { createBackend, remote } from './backend.js'
 import { insights } from './insights.js'
-import { canSharePoster, renderPoster, sharePayload } from './share.js'
+import { renderPoster, sharePayload, shareMethod } from './share.js'
 import { coverSize } from './archive-core.js'
 
 // Rotator / copy / player are nice-to-have. If a stale cache drops one of them, the archive
@@ -45,7 +45,7 @@ const easeOut = travelMod?.easeOut || (t => 1 - (1 - Math.min(1, Math.max(0, t))
 const easeTravel = travelMod?.easeTravel || (t => { const x = Math.min(1, Math.max(0, t)); return x * x * x * (x * (x * 6 - 15) + 10) })
 const lerp = travelMod?.lerp || ((a, b, t) => a + (b - a) * t)
 const clockParts = travelMod?.clockParts || (ms => { const d = new Date(ms); return Number.isNaN(d.getTime()) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() } })
-const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 24) => (target ? [target] : []).concat(events || []).slice(0, limit))
+const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 48) => (target ? [target] : []).concat(events || []).slice(0, limit))
 const fillTravelWall = travelMod?.fillTravelWall || (items => items || [])
 const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 400, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0, scale: 1, blur: 0, brightness: 1 }))
 const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
@@ -53,6 +53,7 @@ const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 
 const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
+const TRAVEL_MAX_COVERS = travelMod?.TRAVEL_MAX_COVERS || 48
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -125,6 +126,33 @@ function toast(message, tone = 'info') {
 }
 const fail = err => toast(err.message, 'error')
 const n = value => (value || 0).toLocaleString('zh-CN')
+function artistCount(events) {
+  const names = new Set()
+  for (const e of events) for (const part of String(e.artists || '').split(' / ')) {
+    const name = part.trim()
+    if (name) names.add(name)
+  }
+  return names.size
+}
+function padDate(y, m, d) { return `${y}.${String(m).padStart(2, '0')}.${String(d).padStart(2, '0')}` }
+function renderHeroStats(shown) {
+  const box = $('heroStats')
+  if (!box) return
+  if (!shown) { box.hidden = true; return }
+  const songs = $('statSongs'), artists = $('statArtists'), days = $('statDays')
+  if (!songs || !artists || !days) return
+  const sig = `${shown.available}-${shown.artists}-${shown.days}-${shown.range}`
+  const before = [songs, artists, days].map(el => Number(String(el.textContent || '').replace(/[^\d]/g, '')))
+  songs.textContent = n(shown.available)
+  artists.textContent = n(shown.artists)
+  days.textContent = n(shown.days)
+  $('heroStatRange').textContent = shown.range || ''
+  box.hidden = false
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig
+    countUp(box, before.some(Boolean) ? before : [])
+  }
+}
 const ymd = date => date.split('-').map(Number)
 function dayLabel(date, year = false) { const [y, m, d] = ymd(date); return `${year ? `${y} 年 ` : ''}${m} 月 ${d} 日` }
 function weekday(date) { const [y, m, d] = ymd(date); return WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] }
@@ -279,9 +307,10 @@ function countUp(root, from = []) {
   for (const [k, b] of [...root.querySelectorAll('.num')].entries()) {
     const target = Number(b.textContent.replace(/[^\d]/g, '')), origin = from[k] ?? 0
     if (!target || target < 3 || origin === target) continue
-    const start = performance.now(), duration = from.length ? 700 : Math.min(1400, 600 + target * 4)
+    const start = performance.now() + k * 90, duration = from.length ? 700 : Math.min(1400, 600 + target * 4)
     b.classList.add('counting')
     const tick = now => {
+      if (now < start) { requestAnimationFrame(tick); return }
       const t = Math.min(1, (now - start) / duration), eased = 1 - (1 - t) ** 4
       b.textContent = n(Math.round(origin + (target - origin) * eased))
       if (t < 1) requestAnimationFrame(tick); else b.classList.remove('counting')
@@ -341,7 +370,7 @@ function renderStatus() {
     }
   } else {
     // Numbers follow what is shown (the liked-only filter included).
-    const shown = state.all.length ? { earliest: state.all[0].date, latest: state.all.at(-1).date, days: new Set(state.all.map(e => e.date)).size, available: state.all.length } : { ...calendar, available: stats.available }
+    const shown = state.all.length ? { earliest: state.all[0].date, latest: state.all.at(-1).date, days: new Set(state.all.map(e => e.date)).size, available: state.all.length, artists: artistCount(state.all) } : { ...calendar, available: stats.available, artists: 0 }
     const [ey, em, ed] = ymd(shown.earliest), [ly, lm, ld] = ymd(shown.latest)
     const from = `${ey} 年 ${em} 月 ${ed} 日`, to = ey === ly ? `${lm} 月 ${ld} 日` : `${ly} 年 ${lm} 月 ${ld} 日`
     const first = state.all[0]
@@ -356,10 +385,16 @@ function renderStatus() {
       if (!state.counted && first) { state.counted = true; countUp(story) }
       else if (before.length) countUp(story, before) // numbers glide from the old value while a sync adds songs
     }
-    clearCopy(sub, pendingNow(stats) ? `还有 ${n(pendingNow(stats))} 首在排队` : wideScope() ? '都查完了' : '你喜欢的歌都查完了')
+    clearCopy(sub, pendingNow(stats)
+      ? `还有 ${n(pendingNow(stats))} 首在排队`
+      : state.local && !online
+        ? '这份档案来自备份，扫码后就能接着同步'
+        : wideScope() ? '都查完了' : '你喜欢的歌都查完了')
+    renderHeroStats({ ...shown, range: `${padDate(ey, em, ed)}  —  ${padDate(ly, lm, ld)}` })
     $('scrollCue').hidden = false
     $('scrollCueText').textContent = state.order === 'newest' ? '最近的一首' : '最早的一首'
   }
+  if (!has || !stats.available) renderHeroStats(null)
   renderHeroCapsule()
 
   const line = $('syncLine')
@@ -915,11 +950,19 @@ function renderHeroCapsule() {
     const n = result.songs.length
     const first = result.songs[0].event
     line.textContent = n === 1 ? `历史上的今天，你遇见了《${first.name}》` : `历史上的今天，往年遇见过 ${n} 首`
-    if (todayBtn) todayBtn.hidden = false
+    if (todayBtn) {
+      todayBtn.hidden = false
+      todayBtn.textContent = '历史上的今天'
+      todayBtn.title = '回到过去某年的同一天'
+    }
     capsule.todayPick = first
   } else if (result.nearest?.songs?.length) {
     line.textContent = `往年的今天还是空白。最靠近的是 ${result.nearest.m} 月 ${result.nearest.d} 日`
-    if (todayBtn) todayBtn.hidden = false
+    if (todayBtn) {
+      todayBtn.hidden = false
+      todayBtn.textContent = '去最近的那天'
+      todayBtn.title = '去最靠近今天的那个日子'
+    }
     capsule.todayPick = result.nearest.songs[0].event
   } else {
     line.textContent = '往年的今天，还没有记下初听'
@@ -1007,9 +1050,9 @@ function renderCapsuleToday(body) {
 }
 function renderCapsuleRandom(body) {
   if (!state.all.length) { body.append(node('p', 'capsule-lede', '还没有可以回顾的初听。')); return }
-  const lede = node('p', 'capsule-lede', '随便抽一个第一次。也许是很久以前，也许就在上个月。')
-  const hint = node('p', 'capsule-hint', '封面会带着你穿越回去，歌也会一起响起来。')
-  const go = node('button', 'button primary', '开始穿越')
+  const lede = node('p', 'capsule-lede', '不挑日子，从档案里随便抽一个第一次。也许是很久以前，也许就在上个月。')
+  const hint = node('p', 'capsule-hint', '和「历史上的今天」不同：这里不会固定月日，每一次都是另一天。')
+  const go = node('button', 'button primary', '随机穿越')
   go.type = 'button'
   go.addEventListener('click', () => {
     const event = capsuleRandom(state.all, Math.random, capsule.lastRandom)
@@ -1184,14 +1227,18 @@ function decodeTravelCover(url) {
     }).catch(() => null)
   })
 }
+let travelCoverPick = null
+function refreshTravelCoverPick(target) {
+  travelCoverPick = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
+  return travelCoverPick
+}
+function tunnelCoverPick(target) {
+  if (!travelCoverPick?.length) refreshTravelCoverPick(target)
+  return travelCoverPick
+}
 function preloadTravelLibrary() {
-  const seen = new Set()
-  for (const e of state.all) {
-    if (!e?.cover || seen.has(e.cover)) continue
-    seen.add(e.cover)
-    decodeTravelCover(e.cover)
-    if (seen.size >= 48) break
-  }
+  const picked = refreshTravelCoverPick(capsule.todayPick || state.all[0])
+  for (const e of picked) if (e?.cover) decodeTravelCover(e.cover)
 }
 function readyTravelArts(picked) {
   const out = []
@@ -1204,17 +1251,14 @@ function readyTravelArts(picked) {
   }
   return out
 }
+function gatherTravelArts(target, picked = tunnelCoverPick(target)) {
+  return fillTravelWall(readyTravelArts(picked).filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
+}
 async function collectTunnelArts(target) {
-  const picked = pickTravelCovers(state.all, target, 24)
+  const picked = tunnelCoverPick(target)
   const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover) : Promise.resolve(null))
-  const settle = Promise.all(pending).catch(() => {})
-  await Promise.race([settle, new Promise(r => setTimeout(r, 480))])
-  let ready = readyTravelArts(picked)
-  if (!ready.length) {
-    await Promise.race([settle, new Promise(r => setTimeout(r, 280))])
-    ready = readyTravelArts(picked)
-  }
-  return fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
+  await Promise.race([Promise.all(pending).catch(() => {}), new Promise(r => setTimeout(r, 900))])
+  return gatherTravelArts(target, picked)
 }
 function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
@@ -1238,7 +1282,7 @@ function buildTravelTunnel(target, arts) {
   const tunnel = $('travelTunnel')
   if (!tunnel) return 0
   tunnel.replaceChildren()
-  const ready = arts && arts.length ? arts : readyTravelArts(pickTravelCovers(state.all, target, 24))
+  const ready = arts && arts.length ? arts : readyTravelArts(tunnelCoverPick(target))
   const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
   const list = walls.length ? walls : fillTravelWall(ready, TRAVEL_TILES)
   if (!list.length) {
@@ -1434,9 +1478,7 @@ function startTravel(event, { source = 'random' } = {}) {
   cancelAnimationFrame(travel.raf)
   if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
-  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)).filter(a => a.event?.song_id !== event?.song_id), TRAVEL_TILES)
-  if (cached.length) beginTravelMotion(event, cached)
-  else collectTunnelArts(event).then(arts => {
+  collectTunnelArts(event).then(arts => {
     if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
     beginTravelMotion(event, arts)
   })
@@ -1911,10 +1953,24 @@ function saveShare() {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 async function nativeShare() {
-  if (!shareState.blob) return
-  const file = new File([shareState.blob], shareState.name, { type: 'image/png' })
-  try { await navigator.share({ files: [file], title: '初听', text: shareState.text }) }
-  catch (err) { if (err?.name !== 'AbortError') toast('没能分享出去', 'error') }
+  const text = shareState.text
+  const method = shareMethod(shareState.blob)
+  try {
+    if (method === 'files') {
+      const file = new File([shareState.blob], shareState.name, { type: 'image/png' })
+      await navigator.share({ files: [file], title: '初听', text })
+      return
+    }
+    if (method === 'text') {
+      await navigator.share({ title: '初听', text })
+      return
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+    toast('没能分享出去', 'error')
+    return
+  }
+  await copyShareText()
 }
 async function openShare() {
   const payload = sharePayload({ events: state.all })
@@ -1932,7 +1988,6 @@ async function openShare() {
   $('shareStage').replaceChildren()
   $('shareStage').setAttribute('aria-busy', 'true')
   $('shareSave').disabled = true
-  $('shareNative').hidden = true
   openModal(dialog)
   try {
     const { canvas, blob } = await renderPoster(payload.poster)
@@ -1945,20 +2000,18 @@ async function openShare() {
     status.hidden = true
     shareState.blob = blob
     $('shareSave').disabled = false
-    $('shareNative').hidden = !canSharePoster(blob)
   } catch {
     if (job !== shareJob) return
     $('shareStage').setAttribute('aria-busy', 'false')
     status.hidden = false
-    status.textContent = '海报没画出来，文字还可以复制。'
+    status.textContent = '海报没画出来，还可以分享文字。'
   }
 }
 $('shareButton')?.addEventListener('click', () => openShare())
 $('closeShare')?.addEventListener('click', () => closeDialog($('shareDialog')))
 $('shareDialog')?.addEventListener('close', () => { shareJob++ })
 $('shareSave')?.addEventListener('click', saveShare)
-$('shareCopy')?.addEventListener('click', () => copyShareText())
-$('shareNative')?.addEventListener('click', () => nativeShare())
+$('shareAction')?.addEventListener('click', () => nativeShare())
 $('settingsButton').addEventListener('click', () => { renderSettings(); openModal($('settingsDialog')) })
 $('closeSettings').addEventListener('click', () => closeDialog($('settingsDialog')))
 $('closeSong').addEventListener('click', () => closeDialog($('songDialog')))

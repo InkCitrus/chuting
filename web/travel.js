@@ -2,7 +2,7 @@
 export const TRAVEL_MS = 3500
 export const TRAVEL_BACK_MS = 920
 export const TRAVEL_REDUCED_MS = 340
-export const TRAVEL_MAX_COVERS = 24
+export const TRAVEL_MAX_COVERS = 48
 export const TRAVEL_COVER_PX = 200
 export const TRAVEL_TILES = 120
 export const TRAVEL_SIDES = 4
@@ -62,9 +62,10 @@ export function travelFx(t) {
   }
 }
 
-// Prefer events that actually have artwork. Never pad the tunnel with letter tiles
-// when at least one real cover exists; the letter fallback is only for empty archives.
-export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
+// Up to 48 distinct covers, picked at random from the whole archive and
+// deduped by cover URL. Never pad with letter tiles when at least one real
+// cover exists; the letter fallback is only for empty archives.
+export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS, rng = Math.random) {
   const list = Array.isArray(events) ? events : []
   const cap = Math.max(1, Math.min(TRAVEL_MAX_COVERS, limit || TRAVEL_MAX_COVERS))
   const out = [], seen = new Set()
@@ -79,9 +80,14 @@ export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
   const pictured = rest.filter(e => e.cover)
   const pool = pictured.length ? pictured : rest
   const reserve = target && (target.cover || !pictured.length) ? 1 : 0
-  const step = Math.max(1, Math.floor(pool.length / Math.max(1, cap - reserve)))
-  for (let i = 0; i < pool.length && out.length < cap - reserve; i += step) add(pool[i])
-  for (const e of pool) { if (out.length >= cap - reserve) break; add(e) }
+  const budget = cap - reserve
+  const shuffled = pool.slice()
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const n = Number(typeof rng === 'function' ? rng() : Math.random())
+    const j = Math.min(i, Math.max(0, Math.floor((Number.isFinite(n) ? n : 0) * (i + 1))))
+    const swap = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = swap
+  }
+  for (const e of shuffled) { if (out.length >= budget) break; add(e) }
   if (target && (target.cover || !pictured.length)) add(target)
   return out
 }

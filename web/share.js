@@ -260,10 +260,28 @@ export function sharePayload(archive) {
 }
 
 export function canSharePoster(blob) {
+  return shareMethod(blob) === 'files'
+}
+
+// Decide how 「分享」 should work: file+text via Web Share, text-only share, or clipboard copy.
+// The payload is only title, text, and optionally the PNG — never a profile url or account fields.
+export function shareMethod(blob, nav = typeof navigator === 'undefined' ? null : navigator) {
   try {
-    if (!blob || typeof navigator === 'undefined' || typeof navigator.canShare !== 'function' || typeof File !== 'function') return false
-    return navigator.canShare({ files: [new File([blob], 'chuting.png', { type: 'image/png' })] })
-  } catch { return false }
+    if (blob && typeof nav?.canShare === 'function' && typeof File === 'function'
+      && nav.canShare({ files: [new File([blob], 'chuting.png', { type: 'image/png' })] })) return 'files'
+  } catch { /* fall through */ }
+  if (typeof nav?.share === 'function') return 'text'
+  return 'copy'
+}
+
+export function shareData({ blob, text, name, title = '初听' } = {}, nav = typeof navigator === 'undefined' ? null : navigator) {
+  const method = shareMethod(blob, nav)
+  if (method === 'files') {
+    const file = new File([blob], name || 'chuting.png', { type: 'image/png' })
+    return { method, data: { files: [file], title, text } }
+  }
+  if (method === 'text') return { method, data: { title, text } }
+  return { method, data: { text } }
 }
 
 function loadImageElement(src) {

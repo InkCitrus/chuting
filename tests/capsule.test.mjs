@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { localYmd, yearsAgoLabel, monthDayDistance, onThisDay, nearestDay, capsuleToday, neighbors, randomMoment, sinceLabel } from '../web/capsule.js'
+import { localYmd, yearsAgoLabel, monthDayDistance, isPastMonthDay, onThisDay, nearestDay, capsuleToday, neighbors, randomMoment, sinceLabel } from '../web/capsule.js'
 
 const ev = (id, iso, extra = {}) => {
   const first_listen_ms = Date.parse(iso)
@@ -59,6 +59,37 @@ test('29 February only matches other leap days, and is the nearest neighbour of 
   assert.ok(empty.nearest)
   assert.equal(empty.nearest.dist, 1)
   assert.ok([29, 1].includes(empty.nearest.d))
+})
+
+test('when two days are equally close, nearestDay prefers the one just behind today', () => {
+  const now = new Date(2026, 10, 8, 12, 0, 0) // 8 Nov
+  const past = ev(1, new Date(2024, 10, 7, 9, 0).toISOString())
+  const future = ev(2, new Date(2024, 10, 9, 9, 0).toISOString())
+  const near = nearestDay([past, future], now)
+  assert.equal(near.m, 11)
+  assert.equal(near.d, 7)
+  assert.equal(near.dist, 1)
+  assert.equal(isPastMonthDay({ m: 11, d: 8 }, { m: 11, d: 7 }), true)
+  assert.equal(isPastMonthDay({ m: 11, d: 8 }, { m: 11, d: 9 }), false)
+  const nye = nearestDay([
+    ev(3, new Date(2024, 11, 31, 12, 0).toISOString()),
+    ev(4, new Date(2025, 0, 2, 12, 0).toISOString())
+  ], new Date(2026, 0, 1, 12, 0, 0))
+  assert.equal(nye.m, 12)
+  assert.equal(nye.d, 31)
+})
+
+test('nearestDay ignores today and the current year, so a closer listen from this year does not win', () => {
+  const now = new Date(2026, 10, 8, 12, 0, 0)
+  const thisYearCloser = ev(1, new Date(2026, 10, 7, 9, 0).toISOString())
+  const lastYearFarther = ev(2, new Date(2025, 10, 1, 9, 0).toISOString())
+  const todayThisYear = ev(3, new Date(2026, 10, 8, 8, 0).toISOString())
+  const near = nearestDay([thisYearCloser, lastYearFarther, todayThisYear], now)
+  assert.equal(near.m, 11)
+  assert.equal(near.d, 1)
+  assert.equal(near.songs[0].event.song_id, '2')
+  assert.equal(near.songs[0].yearsAgo, 1)
+  assert.equal(nearestDay([thisYearCloser, todayThisYear], now), null)
 })
 
 test('empty today suggests the nearest month-day and random can re-roll', () => {
