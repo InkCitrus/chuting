@@ -275,6 +275,8 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .hero-story .mark, .chapter-story .mark { white-space: nowrap; font-weight: 700; background: linear-gradient(transparent 64%, var(--accent-soft) 64%, var(--accent-soft) 92%, transparent 92%); padding: 0 .08em }
 .hero-story .mark.wrap { white-space: normal }
 .hero-sub { color: var(--muted); font-size: 15px; margin: 18px 0 0; max-width: 40em }
+.hero-stats { display: none }
+
 .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin-top: 34px }
 .hero-actions:has(> :not([hidden])) { min-height: 52px }
 .scroll-cue {
@@ -707,6 +709,137 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hl-title { font-size: 18px; -webkit-line-clamp: 1 }
   .hl-meta { font-size: 13px }
   .hl-line { font-size: 12.5px }
+
+  /* 有档案时：手机首页改成以封面带领的一屏，不再像一篇长文 */
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+    padding: 18px 0 24px;
+    min-height: calc(100svh - var(--bar));
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-text { display: contents }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .kicker,
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-tagline,
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-story,
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-sub { display: none }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-title {
+    order: 1;
+    font-size: 54px;
+    margin: 0;
+    line-height: .92;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-pre {
+    font-size: .36em;
+    padding-top: .12em;
+    margin-right: .16em;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .highlights {
+    order: 2;
+    width: 100%;
+    max-width: none;
+    margin: 2px 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-stage { height: 270px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-open {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-art {
+    width: 268px;
+    height: 200px;
+    flex-shrink: 0;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-sleeve,
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-mosaic {
+    width: 200px;
+    height: 200px;
+    top: 0;
+    left: 0;
+    border-radius: 12px;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-sleeve .glyph { font-size: 84px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-disc {
+    width: 180px;
+    height: 180px;
+    left: 10px;
+    top: 10px;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-slide.is-active .hl-disc { transform: translateX(52px) }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-slide[data-kind="song"] .hl-text { padding-right: 0 }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-text { gap: 2px; max-width: 100% }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-kicker { font-size: 11px; letter-spacing: .16em }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-title { font-size: 22px; -webkit-line-clamp: 1 }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-meta { font-size: 13px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-line { display: none }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-controls {
+    width: 200px;
+    margin-top: 10px;
+  }
+  .hero-stats:not([hidden]) {
+    order: 3;
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    padding-top: 2px;
+  }
+  .hero-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 12px;
+    align-items: end;
+  }
+  .hero-stat { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+  .hero-stat .num {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1;
+    color: var(--accent);
+    font-variant-numeric: lining-nums tabular-nums;
+    letter-spacing: -.02em;
+  }
+  .hero-stat span {
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .hero-stat-range {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .03em;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule {
+    order: 4;
+    margin-top: 2px;
+    padding-top: 14px;
+    max-width: none;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule-kicker { margin-bottom: 4px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule-line { font-size: 15px; margin-bottom: 4px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-actions {
+    order: 5;
+    margin-top: 0;
+    min-height: 0;
+  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .sync-line {
+    order: 6;
+    margin-top: 4px;
+    padding-top: 12px;
+    font-size: 13px;
+  }
   .intro-title { font-size: 25px }
   .intro-steps li { padding: 20px 20px 18px }
   .step-num { font-size: 32px }

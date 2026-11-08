@@ -126,6 +126,33 @@ function toast(message, tone = 'info') {
 }
 const fail = err => toast(err.message, 'error')
 const n = value => (value || 0).toLocaleString('zh-CN')
+function artistCount(events) {
+  const names = new Set()
+  for (const e of events) for (const part of String(e.artists || '').split(' / ')) {
+    const name = part.trim()
+    if (name) names.add(name)
+  }
+  return names.size
+}
+function padDate(y, m, d) { return `${y}.${String(m).padStart(2, '0')}.${String(d).padStart(2, '0')}` }
+function renderHeroStats(shown) {
+  const box = $('heroStats')
+  if (!box) return
+  if (!shown) { box.hidden = true; return }
+  const songs = $('statSongs'), artists = $('statArtists'), days = $('statDays')
+  if (!songs || !artists || !days) return
+  const sig = `${shown.available}-${shown.artists}-${shown.days}-${shown.range}`
+  const before = [songs, artists, days].map(el => Number(String(el.textContent || '').replace(/[^\d]/g, '')))
+  songs.textContent = n(shown.available)
+  artists.textContent = n(shown.artists)
+  days.textContent = n(shown.days)
+  $('heroStatRange').textContent = shown.range || ''
+  box.hidden = false
+  if (box.dataset.sig !== sig) {
+    box.dataset.sig = sig
+    countUp(box, before.some(Boolean) ? before : [])
+  }
+}
 const ymd = date => date.split('-').map(Number)
 function dayLabel(date, year = false) { const [y, m, d] = ymd(date); return `${year ? `${y} 年 ` : ''}${m} 月 ${d} 日` }
 function weekday(date) { const [y, m, d] = ymd(date); return WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] }
@@ -342,7 +369,7 @@ function renderStatus() {
     }
   } else {
     // Numbers follow what is shown (the liked-only filter included).
-    const shown = state.all.length ? { earliest: state.all[0].date, latest: state.all.at(-1).date, days: new Set(state.all.map(e => e.date)).size, available: state.all.length } : { ...calendar, available: stats.available }
+    const shown = state.all.length ? { earliest: state.all[0].date, latest: state.all.at(-1).date, days: new Set(state.all.map(e => e.date)).size, available: state.all.length, artists: artistCount(state.all) } : { ...calendar, available: stats.available, artists: 0 }
     const [ey, em, ed] = ymd(shown.earliest), [ly, lm, ld] = ymd(shown.latest)
     const from = `${ey} 年 ${em} 月 ${ed} 日`, to = ey === ly ? `${lm} 月 ${ld} 日` : `${ly} 年 ${lm} 月 ${ld} 日`
     const first = state.all[0]
@@ -358,9 +385,11 @@ function renderStatus() {
       else if (before.length) countUp(story, before) // numbers glide from the old value while a sync adds songs
     }
     clearCopy(sub, pendingNow(stats) ? `还有 ${n(pendingNow(stats))} 首在排队` : wideScope() ? '都查完了' : '你喜欢的歌都查完了')
+    renderHeroStats({ ...shown, range: `${padDate(ey, em, ed)}  —  ${padDate(ly, lm, ld)}` })
     $('scrollCue').hidden = false
     $('scrollCueText').textContent = state.order === 'newest' ? '最近的一首' : '最早的一首'
   }
+  if (!has || !stats.available) renderHeroStats(null)
   renderHeroCapsule()
 
   const line = $('syncLine')
