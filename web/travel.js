@@ -127,9 +127,8 @@ export function travelStageLayout(width, height, quality = 'full') {
   if (!portrait) {
     const faceCounts = TRAVEL_FACE_COUNTS.slice()
     const perRing = faceCounts.reduce((sum, count) => sum + count, 0)
-    const rings = lite ? 4 : 5
+    const rings = lite ? 4 : TRAVEL_RINGS
     const spacing = 310
-    const zFront = 20
     return {
       portrait: false,
       quality: lite ? 'lite' : 'full',
@@ -138,25 +137,23 @@ export function travelStageLayout(width, height, quality = 'full') {
       faceCounts,
       perspective: 900,
       spacing,
-      zMin: zFront - rings * spacing,
+      zMin: lite ? 20 - rings * spacing : -1640,
       rotateX: lite ? 16 : 24,
       rotateY: lite ? 20 : 28,
-      cornerInset: lite ? 32 : 32,
+      cornerInset: 0,
       rings,
       tiles: perRing * rings,
       coverPx: lite ? TRAVEL_COVER_PX_LITE : TRAVEL_COVER_PX_DESKTOP
     }
   }
   // Side walls sit inside a phone frame so covers stream through the whole
-  // portrait. Walls stay tilted; a modest corner inset and a near-plane fade
-  // keep perspective from clipping squares into triangles without shrinking
-  // the tube. zMin is chosen so the front of the tunnel sits close enough
-  // for covers to read at the original on-screen size.
-  const faceCounts = lite ? [3, 3, 2, 2] : [5, 5, 3, 3]
+  // portrait. Density, depth and wall span match the original full-bleed
+  // tunnel; cards stay tilted. A card is hidden only once it crosses the
+  // near plane, not earlier, so the near covers still reach the screen edges.
+  const faceCounts = lite ? [3, 3, 2, 2] : [6, 6, 4, 4]
   const perRing = faceCounts.reduce((sum, count) => sum + count, 0)
-  const rings = lite ? 3 : 4
+  const rings = lite ? 3 : TRAVEL_RINGS
   const spacing = 250
-  const zFront = 30
   return {
     portrait: true,
     quality: lite ? 'lite' : 'full',
@@ -165,10 +162,10 @@ export function travelStageLayout(width, height, quality = 'full') {
     faceCounts,
     perspective: 640,
     spacing,
-    zMin: zFront - rings * spacing,
+    zMin: lite ? 30 - rings * spacing : -1420,
     rotateX: lite ? 10 : 14,
     rotateY: lite ? 12 : 16,
-    cornerInset: lite ? 26 : 26,
+    cornerInset: 0,
     rings,
     tiles: perRing * rings,
     coverPx: lite ? TRAVEL_COVER_PX_LITE : TRAVEL_COVER_PX_MOBILE
@@ -221,20 +218,14 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
   const nearness = Math.min(1, Math.max(0, (z - zMin) / Math.max(1, length - 220)))
   const brightness = 0.2 + 0.8 * nearness
   let opacity = 1
-  const farFade = layout?.portrait ? 160 : 90
-  // Corner cards (ends of a wall) hit the view frustum first. Hide those
-  // earlier so they are not sliced into triangles, while mid-wall covers
-  // can stay large and close.
-  const edge = across > 1 ? Math.min(1, Math.abs(offset) / ((across - 1) / 2)) : 0
-  const edgeBoost = layout?.portrait ? 150 : 90
-  const nearHide = (layout?.portrait ? -30 : 12) - edge * edgeBoost
-  const nearStart = nearHide - (layout?.portrait ? 80 : 70)
+  // Hide a card only when its center actually crosses the near plane
+  // (approaches the camera at `perspective`). Earlier fades and edge-aware
+  // hides removed the large near and corner covers that filled the frame.
+  const cam = layout?.perspective ?? 900
+  const nearHide = cam - 40
   if (z >= nearHide) opacity = 0
-  else if (z > nearStart) opacity = Math.max(0, (nearHide - z) / 70)
-  else if (z < zMin + farFade) {
-    opacity = Math.max(0, (z - zMin) / farFade)
-    if (z < zMin + 36) opacity = 0
-  }
+  else if (z > nearHide - 80) opacity = Math.max(0, (nearHide - z) / 80)
+  else if (z < zMin + 90) opacity = 0.28 + 0.72 * Math.max(0, (z - zMin) / 90)
   return { x, y, z, opacity, rotate: 0, rotateX, rotateY, scale: 1, blur: 0, brightness, face, ring, side: face < 2 ? (face === 0 ? -1 : 1) : 0 }
 }
 

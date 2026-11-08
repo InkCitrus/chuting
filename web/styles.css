@@ -1303,11 +1303,11 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 @keyframes travel-in { from { opacity: 0 } }
 
 /* 隧道：四面密铺封面，向消失点流去 */
-.travel-stage { --travel-glow: 196 142 78; --travel-perspective: 900px; position: absolute; inset: 0; perspective: var(--travel-perspective); perspective-origin: 50% 46%; overflow: visible; contain: layout style }
-.travel-back { position: absolute; inset: -12%; z-index: 0; overflow: hidden; pointer-events: none; background: #0c0b0a }
-.travel-back img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.28);
-  filter: none; opacity: .58 }
-.travel-back::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: rgb(12 11 10 / .42) }
+.travel-stage { --travel-glow: 196 142 78; --travel-perspective: 900px; position: absolute; inset: 0; perspective: var(--travel-perspective); perspective-origin: 50% 46%; overflow: hidden; contain: layout style }
+.travel-back { position: absolute; inset: -18%; z-index: 0; overflow: hidden; pointer-events: none; background: #0c0b0a }
+.travel-back img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.22);
+  filter: none; opacity: .78 }
+.travel-back::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: rgb(12 11 10 / .28) }
 .travel-back img[hidden] { display: none }
 .travel-stage[hidden] { display: none }
 .travel-bloom { position: absolute; inset: 0; pointer-events: none; z-index: 2; opacity: .55;
