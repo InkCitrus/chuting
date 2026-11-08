@@ -47,13 +47,31 @@ export function audioUrl(value) {
     return url.toString()
   } catch { return null }
 }
+const HARD_AUDIO = new Set(['flac', 'wav', 'ape', 'aiff', 'dsf', 'dff'])
+const LOSSY_AUDIO = new Set(['mp3', 'aac', 'm4a'])
+const HARD_LEVELS = new Set(['lossless', 'hires', 'jyeffect', 'sky', 'jymaster'])
+export function hardAudio(answer) {
+  if (!answer?.url) return false
+  if (HARD_AUDIO.has(answer.type)) return true
+  if (HARD_LEVELS.has(answer.level)) return true
+  return answer.br > 320000 && Boolean(answer.type) && !LOSSY_AUDIO.has(answer.type)
+}
+// A null URL is not a codec problem. fee 1/4 is membership or a purchase; cannotListenReason 1
+// is the copyright block the public song-url API returns for tracks the account cannot play.
+function listenBlock(item) {
+  const fee = Number(item?.fee) || 0
+  const why = Number(item?.freeTrialPrivilege?.cannotListenReason)
+  if ([1, 4].includes(fee) || [2, 3, 4].includes(why)) return 'rights'
+  if (why === 1) return 'copyright'
+  return 'unavailable'
+}
 export function playable(body, id) {
   const item = (body?.data || []).find(x => String(x.id) === String(id)) || body?.data?.[0] || {}
   const url = audioUrl(item.url)
-  if (!url) return { id: String(id), url: null, reason: [1, 4].includes(item.fee) ? 'rights' : 'unavailable' }
+  if (!url) return { id: String(id), url: null, reason: listenBlock(item) }
   // freeTrialInfo is only set when this account lacks the rights: the URL is then a preview clip.
   const trial = item.freeTrialInfo ? { start: Number(item.freeTrialInfo.start) || 0, end: Number(item.freeTrialInfo.end) || 0 } : null
-  return { id: String(id), url, type: String(item.type || '').toLowerCase(), br: Number(item.br) || 0, duration: Number(item.time) || 0, level: item.level || '', trial }
+  return { id: String(id), url, type: String(item.type || '').toLowerCase(), br: Number(item.br) || 0, duration: Number(item.time) || 0, level: String(item.level || '').toLowerCase(), trial }
 }
 // Dependency injection is used by tests, never controlled by HTTP input.
 export async function handleApi(request, env, upstream = callNetease) {
@@ -105,12 +123,14 @@ export async function handleApi(request, env, upstream = callNetease) {
     if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })
     if (body.method === 'song_url') {
       let answer = playable(result.body, body.query?.id)
-      // Some tracks have no high-bitrate file, or only a trial clip at the first level: ask once more
-      // at standard MP3. If that extra call fails, keep the first answer instead of failing the request.
-      if ((!answer.url || answer.trial) && body.query?.level !== 'standard') {
+      // One quieter ask: no file, a preview, or a FLAC / hi-res master. Standard MP3 is the level
+      // browsers actually decode. A thrown retry keeps the first answer; never ask a third time.
+      if ((!answer.url || answer.trial || hardAudio(answer)) && body.query?.level !== 'standard') {
         try {
           const again = playable((await upstream('song_url', { ...body.query, level: 'standard', encodeType: 'mp3' }, session.cookie, session.account.uid)).body, body.query?.id)
-          if (again.url && (!again.trial || !answer.url)) answer = again
+          const lossy = again.url && !hardAudio(again)
+          if (lossy && (!again.trial || !answer.url || hardAudio(answer))) answer = again
+          else if (!answer.url && again.url) answer = again
         } catch {}
       }
       return json(answer)

@@ -128,14 +128,37 @@ test('player: the session is forwarded, the URL comes back over https from the a
     return { body: { code: 200, data: [{ id: 7, url: null, fee: 1 }] }, cookie: {} }
   })
   assert.deepEqual(body, { id: '7', url: null, reason: 'rights' })
+  // A FLAC / hi-res master is asked again once, at standard MP3, and that lossy URL wins.
+  const levels = []
+  body = await ask(async (_method, query) => {
+    levels.push(query.level || 'first')
+    if (query.level === 'standard') return { body: { code: 200, data: [{ id: 7, url: 'https://m801.music.126.net/std.mp3', br: 128000, type: 'mp3', time: 368000, fee: 1, level: 'standard' }] }, cookie: {} }
+    return { body: { code: 200, data: [{ id: 7, url: 'https://m701.music.126.net/sq.flac', br: 983061, type: 'flac', time: 368000, fee: 1, level: 'lossless' }] }, cookie: {} }
+  })
+  assert.deepEqual(levels, ['first', 'standard'])
+  assert.equal(body.type, 'mp3')
+  assert.equal(body.url, 'https://m801.music.126.net/std.mp3')
+  // Still FLAC at the lower level: stop. A third request would loop.
+  let calls = 0
+  body = await ask(async () => {
+    calls++
+    return { body: { code: 200, data: [{ id: 7, url: 'https://m701.music.126.net/sq.flac', br: 983061, type: 'flac', time: 368000, fee: 0, level: 'lossless' }] }, cookie: {} }
+  })
+  assert.equal(calls, 2)
+  assert.equal(body.type, 'flac')
+  // No URL, and the privilege says the track cannot be listened to: copyright, not a format error.
+  body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: null, fee: 0, code: 404, freeTrialPrivilege: { cannotListenReason: 1 } }] }, cookie: {} }))
+  assert.deepEqual(body, { id: '7', url: null, reason: 'copyright' })
 })
 test('player endpoint asks NetEase for one song at a bounded quality level', () => {
   const [path, data] = endpoint('song_url', { id: '7', level: 'lossless' })
   assert.equal(path, '/api/song/enhance/player/url/v1')
-  assert.deepEqual(data, { ids: '[7]', level: 'exhigh', encodeType: 'aac' })
+  assert.deepEqual(data, { ids: '[7]', level: 'exhigh', encodeType: 'mp3' })
   assert.equal(endpoint('song_url', { id: '7', level: 'standard' })[1].level, 'standard')
   assert.equal(endpoint('song_url', { id: '7', encodeType: 'mp3' })[1].encodeType, 'mp3')
-  assert.equal(endpoint('song_url', { id: '7', encodeType: 'ogg' })[1].encodeType, 'aac')
+  assert.equal(endpoint('song_url', { id: '7', encodeType: 'aac' })[1].encodeType, 'aac')
+  assert.equal(endpoint('song_url', { id: '7', encodeType: 'flac' })[1].encodeType, 'mp3')
+  assert.equal(endpoint('song_url', { id: '7', encodeType: 'ogg' })[1].encodeType, 'mp3')
   assert.throws(() => endpoint('song_url', { id: '7;drop' }))
 })
 test('CSP lets audio play only from the NetEase CDN', async () => {
