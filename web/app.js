@@ -44,7 +44,9 @@ const easeOut = travelMod?.easeOut || (t => 1 - (1 - Math.min(1, Math.max(0, t))
 const lerp = travelMod?.lerp || ((a, b, t) => a + (b - a) * t)
 const clockParts = travelMod?.clockParts || (ms => { const d = new Date(ms); return Number.isNaN(d.getTime()) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() } })
 const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 24) => (target ? [target] : []).concat(events || []).slice(0, limit))
-const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: 0, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0 }))
+const fillTravelWall = travelMod?.fillTravelWall || (items => items || [])
+const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: 0, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0, scale: 1, blur: 0 }))
+const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 240
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -172,6 +174,9 @@ function coverImg(url, px, eager = false) {
   img.crossOrigin = 'anonymous'
   img.referrerPolicy = 'no-referrer'
   img.src = coverSize(url, px)
+  const reveal = () => { if (img.naturalWidth) img.classList.add('loaded') }
+  if (img.complete) reveal()
+  else img.addEventListener('load', reveal, { once: true })
   return img
 }
 function tile(event, className, px, eager, defer = false) {
@@ -912,6 +917,7 @@ function renderHeroCapsule() {
     line.textContent = '往年的今天，还没有记下初听'
     if (todayBtn) todayBtn.hidden = true
   }
+  preloadTravelLibrary()
 }
 function paintCapsuleRibbon() {
   const ribbon = $('capsuleRibbon')
@@ -1031,18 +1037,139 @@ function poseTravelCards(t, reverse = false) {
   const n = cards.length
   for (let i = 0; i < n; i++) {
     const pose = cardPose(i, n, t, reverse)
-    cards[i].style.opacity = String(pose.opacity)
-    cards[i].style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateZ(${pose.rotate}deg)`
+    const el = cards[i]
+    el.style.opacity = String(pose.opacity)
+    el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateZ(${pose.rotate}deg) scale(${pose.scale || 1})`
+    el.style.filter = pose.blur ? `blur(${pose.blur}px)` : ''
   }
 }
-function buildTravelTunnel(target) {
+const travelArts = new Map()
+function clonedArt(img, className = '') {
+  const next = new Image()
+  next.alt = ''
+  next.decoding = 'sync'
+  next.referrerPolicy = 'no-referrer'
+  if (className) next.className = className
+  next.src = img.currentSrc || img.src
+  return next
+}
+function decodeTravelCover(url) {
+  if (!url) return Promise.resolve(null)
+  const cached = travelArts.get(url)
+  if (cached?.naturalWidth > 0) return Promise.resolve(cached)
+  const img = new Image()
+  img.decoding = 'async'
+  img.referrerPolicy = 'no-referrer'
+  img.crossOrigin = 'anonymous'
+  img.src = coverSize(url, TRAVEL_COVER_PX)
+  return img.decode().then(() => {
+    if (img.naturalWidth > 0) { travelArts.set(url, img); return img }
+    return null
+  }).catch(() => {
+    const plain = new Image()
+    plain.decoding = 'async'
+    plain.referrerPolicy = 'no-referrer'
+    plain.src = coverSize(url, TRAVEL_COVER_PX)
+    return plain.decode().then(() => {
+      if (plain.naturalWidth > 0) { travelArts.set(url, plain); return plain }
+      return null
+    }).catch(() => null)
+  })
+}
+function preloadTravelLibrary() {
+  const seen = new Set()
+  for (const e of state.all) {
+    if (!e?.cover || seen.has(e.cover)) continue
+    seen.add(e.cover)
+    decodeTravelCover(e.cover)
+    if (seen.size >= 48) break
+  }
+}
+function readyTravelArts(picked) {
+  const out = []
+  const seen = new Set()
+  for (const e of picked || []) {
+    const img = e?.cover && travelArts.get(e.cover)
+    if (!img?.naturalWidth || seen.has(e.cover)) continue
+    seen.add(e.cover)
+    out.push({ event: e, img })
+  }
+  return out
+}
+async function collectTunnelArts(target) {
+  const picked = pickTravelCovers(state.all, target, 24)
+  const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover) : Promise.resolve(null))
+  const settle = Promise.all(pending).catch(() => {})
+  await Promise.race([settle, new Promise(r => setTimeout(r, 480))])
+  let ready = readyTravelArts(picked)
+  if (!ready.length) {
+    await Promise.race([settle, new Promise(r => setTimeout(r, 280))])
+    ready = readyTravelArts(picked)
+  }
+  return fillTravelWall(ready, 18)
+}
+function makeTravelCard(art) {
+  const card = node('span', 'travel-card')
+  const streak = node('span', 'travel-card-streak')
+  streak.append(clonedArt(art.img))
+  card.append(streak, clonedArt(art.img, 'travel-card-art'))
+  return card
+}
+function buildTravelTunnel(target, arts) {
   const tunnel = $('travelTunnel')
   if (!tunnel) return 0
   tunnel.replaceChildren()
-  const covers = pickTravelCovers(state.all, target, 24)
-  for (const e of covers) tunnel.append(tile(e, 'travel-card', 160, true))
-  return covers.length
+  const list = arts && arts.length ? arts : fillTravelWall(readyTravelArts(pickTravelCovers(state.all, target, 24)), 18)
+  if (!list.length) {
+    // Truly no decoded covers: fall back to letter tiles rather than an empty corridor.
+    for (const e of pickTravelCovers(state.all, target, 12)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
+    return tunnel.children.length
+  }
+  for (const art of list) tunnel.append(makeTravelCard(art))
+  return list.length
 }
+function nearbyFirsts(event) {
+  let near = capsuleNeighbors(state.all, event, { days: 3, limit: 4 })
+  if (!near.length) near = capsuleNeighbors(state.all, event, { days: 30, limit: 4 })
+  if (!near.length) {
+    near = (state.all || [])
+      .filter(e => e.song_id !== event.song_id)
+      .sort((a, b) => Math.abs((a.first_listen_ms || 0) - event.first_listen_ms) - Math.abs((b.first_listen_ms || 0) - event.first_listen_ms)
+        || (a.first_listen_ms || 0) - (b.first_listen_ms || 0))
+      .slice(0, 4)
+  }
+  return near
+}
+function paintArriveBg(event) {
+  const bg = $('arriveBg')
+  if (!bg) return
+  bg.replaceChildren()
+  const decoded = event.cover && travelArts.get(event.cover)
+  if (decoded) bg.append(clonedArt(decoded))
+  else if (event.cover) {
+    const img = new Image()
+    img.alt = ''
+    img.referrerPolicy = 'no-referrer'
+    img.src = coverSize(event.cover, TRAVEL_COVER_PX)
+    bg.append(img)
+  }
+}
+function paintArriveArt(event) {
+  const current = $('arriveArt')
+  if (!current) return
+  const next = node('div', 'arrive-art')
+  next.id = 'arriveArt'
+  const decoded = event.cover && travelArts.get(event.cover)
+  if (decoded) next.append(clonedArt(decoded, 'arrive-art-img'))
+  else {
+    const fallback = tile(event, 'arrive-art', 400, true)
+    fallback.id = 'arriveArt'
+    current.replaceWith(fallback)
+    return
+  }
+  current.replaceWith(next)
+}
+
 function paintArriveNote(result) {
   const note = $('arriveNote')
   if (!note) return
@@ -1065,22 +1192,8 @@ function showArrival(event) {
   overlay?.classList.remove('is-going')
   const box = $('travelArrive')
   if (box) box.hidden = false
-  const bg = $('arriveBg')
-  if (bg) {
-    bg.replaceChildren()
-    if (event.cover) {
-      const img = new Image()
-      img.alt = ''
-      img.src = coverSize(event.cover, 240)
-      bg.append(img)
-    }
-  }
-  const art = $('arriveArt')
-  if (art) {
-    const next = tile(event, 'arrive-art cover-tile', 400, true)
-    next.id = 'arriveArt'
-    art.replaceWith(next)
-  }
+  paintArriveBg(event)
+  paintArriveArt(event)
   const when = `${dayLabel(event.date, true)}${event.time ? ` ${event.time}` : ''}`
   const since = sinceLabel(event.first_listen_ms)
   if ($('arriveWhen')) $('arriveWhen').textContent = since ? `${when} · ${since}` : when
@@ -1093,14 +1206,22 @@ function showArrival(event) {
   const around = $('arriveAround')
   if (around) {
     around.replaceChildren()
-    const near = capsuleNeighbors(state.all, event, { days: 3, limit: 4 })
+    const near = nearbyFirsts(event)
     if (near.length) {
       around.append(node('p', 'arrive-around-label', '那时前后，你还初听了'))
       const list = node('div', 'arrive-around-list')
       near.forEach(item => {
         const btn = node('button', 'arrive-chip')
         btn.type = 'button'
-        btn.append(tile(item, 'arrive-chip-cover', 72, false), node('span', '', item.name))
+        const decoded = item.cover && travelArts.get(item.cover)
+        if (decoded) {
+          const thumb = node('span', 'arrive-chip-cover')
+          thumb.append(clonedArt(decoded))
+          btn.append(thumb)
+        } else {
+          btn.append(tile(item, 'arrive-chip-cover', 72, true))
+        }
+        btn.append(node('span', '', item.name))
         btn.addEventListener('click', () => startTravel(item, { source: 'neighbor' }))
         list.append(btn)
       })
@@ -1116,9 +1237,27 @@ function finishGoing() {
   showArrival(travel.event)
 }
 function skipTravel() {
-  if (travel.phase !== 'going') return
+  if (travel.phase !== 'going' && travel.phase !== 'waiting') return
   cancelAnimationFrame(travel.raf)
   finishGoing()
+}
+function beginTravelMotion(event, arts) {
+  if (travel.event !== event || (travel.phase !== 'going' && travel.phase !== 'waiting')) return
+  travel.phase = 'going'
+  buildTravelTunnel(event, arts)
+  poseTravelCards(0, false)
+  paintTravelClock(travel.fromMs)
+  cancelAnimationFrame(travel.raf)
+  travel.start = performance.now()
+  const tick = now => {
+    const raw = Math.min(1, (now - travel.start) / travel.duration)
+    const t = easeOut(raw)
+    poseTravelCards(t, false)
+    paintTravelClock(lerp(travel.fromMs, travel.toMs, t))
+    if (raw < 1 && travel.phase === 'going') travel.raf = requestAnimationFrame(tick)
+    else if (travel.phase === 'going') finishGoing()
+  }
+  travel.raf = requestAnimationFrame(tick)
 }
 function startTravel(event, { source = 'random' } = {}) {
   if (!event) return
@@ -1127,7 +1266,7 @@ function startTravel(event, { source = 'random' } = {}) {
   travel.event = event
   travel.source = source
   travel.open = true
-  travel.phase = 'going'
+  travel.phase = 'waiting'
   travel.fromMs = continuing ? (continuing.first_listen_ms || Date.now()) : Date.now()
   travel.toMs = event.first_listen_ms || travel.fromMs
   const quiet = reduced.matches || !motion
@@ -1138,14 +1277,7 @@ function startTravel(event, { source = 'random' } = {}) {
   if ($('travelStage')) { $('travelStage').hidden = quiet; $('travelStage').classList.toggle('is-reduced', quiet) }
   overlay?.classList.toggle('is-arrive', false)
   overlay?.classList.toggle('is-going', !quiet)
-  if (!quiet) {
-    buildTravelTunnel(event)
-    poseTravelCards(0, false)
-    paintTravelClock(travel.fromMs)
-  } else {
-    $('travelTunnel')?.replaceChildren()
-    paintTravelClock(travel.toMs)
-  }
+  paintTravelClock(quiet ? travel.toMs : travel.fromMs)
   if (overlay && !overlay.open) openModal(overlay)
   player?.unlock?.()
   const same = player?.current?.song_id === event.song_id && player?.playing
@@ -1157,17 +1289,14 @@ function startTravel(event, { source = 'random' } = {}) {
     travel.play = Promise.resolve({ ok: true })
   }
   cancelAnimationFrame(travel.raf)
+  if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
-  travel.start = performance.now()
-  const tick = now => {
-    const raw = Math.min(1, (now - travel.start) / travel.duration)
-    const t = easeOut(raw)
-    poseTravelCards(t, false)
-    paintTravelClock(lerp(travel.fromMs, travel.toMs, t))
-    if (raw < 1 && travel.phase === 'going') travel.raf = requestAnimationFrame(tick)
-    else if (travel.phase === 'going') finishGoing()
-  }
-  travel.raf = requestAnimationFrame(tick)
+  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)), 18)
+  if (cached.length) beginTravelMotion(event, cached)
+  else collectTunnelArts(event).then(arts => {
+    if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
+    beginTravelMotion(event, arts)
+  })
 }
 function rerollTravel() {
   let next = null
@@ -1238,7 +1367,7 @@ function syncSettingsExpanded() {
 }
 function closeDialog(dialog, { fromPop = false } = {}) {
   if (dialog?.id === 'travelOverlay') {
-    if (travel.phase === 'going') { skipTravel(); return }
+    if (travel.phase === 'going' || travel.phase === 'waiting') { skipTravel(); return }
     returnToPresent({ fromPop })
     return
   }
@@ -1624,10 +1753,10 @@ $('arriveLocate')?.addEventListener('click', () => locateInTimeline(travel.event
 $('arriveBack')?.addEventListener('click', () => returnToPresent())
 $('travelOverlay')?.addEventListener('cancel', e => {
   e.preventDefault()
-  if (travel.phase === 'going') skipTravel()
+  if (travel.phase === 'going' || travel.phase === 'waiting') skipTravel()
   else returnToPresent()
 })
-$('travelStage')?.addEventListener('click', () => { if (travel.phase === 'going') skipTravel() })
+$('travelStage')?.addEventListener('click', () => { if (travel.phase === 'going' || travel.phase === 'waiting') skipTravel() })
 $('locateBtn')?.addEventListener('click', () => locateInTimeline(state.view[state.current] || player?.current))
 $('miniLocate')?.addEventListener('click', () => locateInTimeline(player?.current))
 $('prevSong').addEventListener('click', () => stepSong(-1))

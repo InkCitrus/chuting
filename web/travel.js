@@ -3,6 +3,7 @@ export const TRAVEL_MS = 2600
 export const TRAVEL_BACK_MS = 920
 export const TRAVEL_REDUCED_MS = 340
 export const TRAVEL_MAX_COVERS = 24
+export const TRAVEL_COVER_PX = 240
 
 export function easeOut(t) {
   const x = Math.min(1, Math.max(0, Number(t) || 0))
@@ -25,6 +26,8 @@ export function formatClock(parts) {
   return `${parts.y}.${pad(parts.m)}.${pad(parts.d)}`
 }
 
+// Prefer events that actually have artwork. Never pad the tunnel with letter tiles
+// when at least one real cover exists; the letter fallback is only for empty archives.
 export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
   const list = Array.isArray(events) ? events : []
   const cap = Math.max(1, Math.min(TRAVEL_MAX_COVERS, limit || TRAVEL_MAX_COVERS))
@@ -37,24 +40,39 @@ export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
     out.push(e)
   }
   const rest = list.filter(e => e && e.song_id !== target?.song_id)
-  const others = rest.filter(e => e.cover).concat(rest.filter(e => !e.cover))
-  const step = Math.max(1, Math.floor(others.length / Math.max(1, cap - 1)))
-  for (let i = 0; i < others.length && out.length < cap - 1; i += step) add(others[i])
-  for (const e of others) { if (out.length >= cap - 1) break; add(e) }
-  if (target) add(target)
+  const pictured = rest.filter(e => e.cover)
+  const pool = pictured.length ? pictured : rest
+  const step = Math.max(1, Math.floor(pool.length / Math.max(1, cap - (target?.cover || !pictured.length ? 1 : 0))))
+  for (let i = 0; i < pool.length && out.length < cap - (target && (target.cover || !pictured.length) ? 1 : 0); i += step) add(pool[i])
+  for (const e of pool) { if (out.length >= cap - (target && (target.cover || !pictured.length) ? 1 : 0)) break; add(e) }
+  if (target && (target.cover || !pictured.length)) add(target)
   return out
 }
 
-// A card starts far down the corridor and rushes past the camera as t goes 0 → 1.
+// Repeat a short decoded wall so a small library still feels like rushing past albums.
+export function fillTravelWall(items, want = 18) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : []
+  if (!list.length) return []
+  const target = Math.min(TRAVEL_MAX_COVERS, list.length >= want ? Math.min(list.length, TRAVEL_MAX_COVERS) : Math.max(list.length, want))
+  if (list.length >= target) return list.slice(0, target)
+  const out = []
+  while (out.length < target) out.push(list[out.length % list.length])
+  return out
+}
+
+// A card starts far down a wide corridor and rushes past the camera as t goes 0 → 1.
 export function cardPose(i, n, t, reverse = false) {
   const p = reverse ? 1 - t : t
-  const lane = (i % 7) - 3
-  const along = (i / Math.max(1, n - 1))
-  const z = -200 - along * 980 + p * 1520
-  const x = lane * 72 + Math.sin(i * 1.7 + p * 1.8) * 16
-  const y = ((i % 5) - 2) * 34 + Math.cos(i * 1.3) * 10
+  const turn = i * 2.399 + p * 1.35
+  const radius = 260 + (i % 5) * 42
+  const x = Math.cos(turn) * radius
+  const y = Math.sin(turn * 0.68) * (radius * 0.4)
+  const along = i / Math.max(1, n - 1)
+  const z = -1580 + along * 640 + p * 2180
+  const scale = 0.82 + Math.max(0, (z + 1000) / 1400)
   let opacity = 1
-  if (z > 260) opacity = Math.max(0, 1 - (z - 260) / 180)
-  else if (z < -860) opacity = Math.max(0, (z + 1100) / 240)
-  return { x, y, z, opacity, rotate: lane * 3.5 }
+  if (z > 340) opacity = Math.max(0, 1 - (z - 340) / 200)
+  else if (z < -1250) opacity = Math.max(0, (z + 1580) / 330)
+  const blur = z < -980 ? 1.8 : Math.min(1.2, Math.abs(x) / 520)
+  return { x, y, z, opacity, rotate: Math.cos(turn) * 7, scale, blur }
 }
