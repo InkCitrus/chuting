@@ -1094,26 +1094,40 @@ function rollClockDigit(el, value) {
 function paintTravelClock(ms, force = false) {
   const parts = clockParts(ms)
   if (!parts) return
-  if ($('travelYear')) $('travelYear').textContent = String(parts.y)
-  if ($('travelMeta')) $('travelMeta').textContent = formatTravelMeta(ms, travel.toMs)
+  setText($('travelYear'), String(parts.y))
+  setText($('travelMeta'), formatTravelMeta(ms, travel.toMs))
   const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
   if (!force && travel.clockAt && now - travel.clockAt < 72) return
   travel.clockAt = now
   rollClockDigit($('travelMonth'), parts.m)
   rollClockDigit($('travelDay'), parts.d)
 }
+// Only transform and opacity change per frame (both composited). Depth shading is a dark layer whose
+// opacity moves, not a filter; paint order comes from the 3D depth, not z-index. Writes are skipped when
+// nothing changed so 120 tiles do not dirty style every frame.
+function setStyle(el, key, value) {
+  const cache = el._pose || (el._pose = {})
+  if (cache[key] === value) return
+  cache[key] = value
+  el.style[key] = value
+}
 function applyCardPose(el, pose) {
   if (!el) return
-  el.style.opacity = String(pose.opacity)
+  const visible = pose.opacity > 0.01
+  setStyle(el, 'visibility', visible ? 'visible' : 'hidden')
+  if (!visible) return
+  setStyle(el, 'opacity', pose.opacity.toFixed(3))
   const rx = pose.rotateX || 0
   const ry = pose.rotateY || 0
-  el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${pose.scale || 1})`
-  const filters = []
-  if (pose.brightness != null && pose.brightness < 0.995) filters.push(`brightness(${pose.brightness.toFixed(3)})`)
-  if (pose.blur) filters.push(`blur(${pose.blur.toFixed(2)}px)`)
-  el.style.filter = filters.join(' ')
-  el.style.zIndex = String(Math.round(1800 + pose.z))
-  el.hidden = pose.opacity <= 0.01
+  setStyle(el, 'transform', `translate3d(${pose.x.toFixed(1)}px, ${pose.y.toFixed(1)}px, ${pose.z.toFixed(1)}px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${(pose.scale || 1).toFixed(4)})`)
+  const shade = el._shade || (el._shade = el.querySelector('.travel-card-shade'))
+  if (shade) {
+    const dark = pose.brightness == null ? 0 : Math.max(0, Math.min(1, 1 - pose.brightness))
+    setStyle(shade, 'opacity', dark.toFixed(2))
+  }
+}
+function setText(el, text) {
+  if (el && el.textContent !== text) el.textContent = text
 }
 function poseTravelCards(t, reverse = false) {
   const cards = $('travelTunnel')?.children || []
@@ -1132,17 +1146,17 @@ function poseTravelCards(t, reverse = false) {
   const clock = $('travelClock')
   if (clock) {
     const fade = t < 0.72 ? 1 : Math.max(0, 1 - (t - 0.72) / 0.2)
-    clock.style.opacity = String(reverse ? Math.min(1, t * 1.4) : fade)
+    setStyle(clock, 'opacity', (reverse ? Math.min(1, t * 1.4) : fade).toFixed(3))
   }
   const line = $('travelPass')
-  if (line && t > 0.05 && t < 0.82 && pass) line.textContent = pass
+  if (line && t > 0.05 && t < 0.82 && pass) setText(line, pass)
   const bar = $('travelBar')
-  if (bar) bar.style.width = `${Math.max(0, Math.min(100, (reverse ? 1 - t : t) * 100)).toFixed(1)}%`
+  if (bar) setStyle(bar, 'transform', `scaleX(${Math.max(0, Math.min(1, reverse ? 1 - t : t)).toFixed(3)})`)
   const fx = reverse ? { flash: 0, streaks: 0, chroma: 0, bloom: 0.35 } : travelFx(t)
-  if ($('travelFlash')) $('travelFlash').style.opacity = fx.flash.toFixed(3)
-  if ($('travelStreaks')) $('travelStreaks').style.opacity = fx.streaks.toFixed(3)
-  if ($('travelChroma')) $('travelChroma').style.opacity = fx.chroma.toFixed(3)
-  if ($('travelBloom')) $('travelBloom').style.opacity = fx.bloom.toFixed(3)
+  for (const [id, v] of [['travelFlash', fx.flash], ['travelStreaks', fx.streaks], ['travelChroma', fx.chroma], ['travelBloom', fx.bloom]]) {
+    const el = $(id)
+    if (el) setStyle(el, 'opacity', v.toFixed(2))
+  }
 }
 function applyTravelGlow(event) {
   const overlay = $('travelOverlay')
@@ -1195,10 +1209,10 @@ function applyTravelGlow(event) {
   $('travelStage')?.style.setProperty('--travel-glow', rgb)
 }
 const travelArts = new Map()
-function clonedArt(img, className = '') {
+function clonedArt(img, className = '', decoding = 'async') {
   const next = new Image()
   next.alt = ''
-  next.decoding = 'sync'
+  next.decoding = decoding
   next.referrerPolicy = 'no-referrer'
   if (className) next.className = className
   next.src = img.currentSrc || img.src
@@ -1264,7 +1278,7 @@ function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
   if (art?.event?.name) card.dataset.name = art.event.name
   if (art?.event?.artists) card.dataset.artists = art.event.artists
-  card.append(clonedArt(art.img, 'travel-card-art'))
+  card.append(clonedArt(art.img, 'travel-card-art'), node('i', 'travel-card-shade'))
   return card
 }
 function paintTravelHero(target) {
@@ -1274,7 +1288,10 @@ function paintTravelHero(target) {
   hero.hidden = true
   const img = target?.cover && travelArts.get(target.cover)
   if (img) {
-    hero.append(clonedArt(img, 'travel-card-art'))
+    hero._pose = null
+    hero._shade = null
+    hero.append(clonedArt(img, 'travel-card-art', 'sync'), node('i', 'travel-card-shade'))
+    hero.hidden = false
     applyCardPose(hero, heroPose(0))
   }
 }
@@ -1305,36 +1322,111 @@ function nearbyFirsts(event) {
   }
   return near
 }
-function paintArriveBg(event) {
+function arriveImg(event, className = '') {
+  const decoded = event.cover && travelArts.get(event.cover)
+  if (decoded) return clonedArt(decoded, className, 'sync')
+  if (!event.cover) return null
+  const img = new Image()
+  img.alt = ''
+  img.decoding = 'async'
+  img.referrerPolicy = 'no-referrer'
+  if (className) img.className = className
+  img.src = coverSize(event.cover, TRAVEL_COVER_PX)
+  return img
+}
+// Background layers stack; a new one fades in over the old, then the old is dropped.
+function paintArriveBg(event, { fade = false } = {}) {
   const bg = $('arriveBg')
   if (!bg) return
-  bg.replaceChildren()
-  const decoded = event.cover && travelArts.get(event.cover)
-  if (decoded) bg.append(clonedArt(decoded))
-  else if (event.cover) {
-    const img = new Image()
-    img.alt = ''
-    img.referrerPolicy = 'no-referrer'
-    img.src = coverSize(event.cover, TRAVEL_COVER_PX)
-    bg.append(img)
-  }
+  const img = arriveImg(event)
+  if (!img) { if (!fade) bg.replaceChildren(); return }
+  const layer = node('div', 'arrive-bg-layer')
+  layer.append(img)
+  if (!fade || !motion || reduced.matches) { bg.replaceChildren(layer); return }
+  bg.append(layer)
+  const anim = layer.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 520, easing: 'ease-out' })
+  anim.finished.then(() => { if (layer.isConnected) [...bg.children].forEach(c => { if (c !== layer && bg.lastElementChild === layer) c.remove() }) }).catch(() => {})
 }
 function paintArriveArt(event) {
   const current = $('arriveArt')
   if (!current) return
-  const next = node('div', 'arrive-art')
+  const img = arriveImg(event, 'arrive-art-img')
+  let next
+  if (img) { next = node('div', 'arrive-art'); next.append(img) }
+  else next = tile(event, 'arrive-art', 400, true)
   next.id = 'arriveArt'
-  const decoded = event.cover && travelArts.get(event.cover)
-  if (decoded) next.append(clonedArt(decoded, 'arrive-art-img'))
-  else {
-    const fallback = tile(event, 'arrive-art', 400, true)
-    fallback.id = 'arriveArt'
-    current.replaceWith(fallback)
-    return
-  }
   current.replaceWith(next)
 }
-
+function paintArriveText(event) {
+  const when = `${dayLabel(event.date, true)}${event.time ? ` ${event.time}` : ''}`
+  setText($('arriveWhen'), when)
+  const since = sinceLabel(event.first_listen_ms) || ''
+  const sinceEl = $('arriveSince')
+  if (sinceEl) { sinceEl.textContent = since; sinceEl.hidden = !since }
+  setText($('travelTitle'), event.name || '')
+  setText($('arriveArtists'), event.artists || '歌手未知')
+}
+// "Around then": the arrived song plus its neighbours, in listening order. Switching to a song already on
+// the shelf only moves the marker, so the shelf reads as one place in time rather than a new trip.
+function shortDay(event) {
+  const [, m, d] = ymd(event.date)
+  return `${m}.${String(d).padStart(2, '0')}`
+}
+function paintArriveShelf(event) {
+  const around = $('arriveAround')
+  if (!around) return
+  const items = [event, ...nearbyFirsts(event)]
+    .sort((a, b) => (a.first_listen_ms || 0) - (b.first_listen_ms || 0))
+  around.replaceChildren()
+  around.hidden = items.length < 2
+  if (items.length < 2) return
+  around.append(node('p', 'arrive-around-label', '那时前后的初听'))
+  const list = node('div', 'arrive-shelf')
+  for (const [i, item] of items.entries()) {
+    const btn = node('button', 'arrive-near')
+    btn.style.setProperty('--i', String(i))
+    btn.type = 'button'
+    btn.dataset.id = String(item.song_id)
+    const cover = node('span', 'arrive-near-cover')
+    const img = arriveImg(item)
+    if (img) cover.append(img)
+    else cover.append(tile(item, 'arrive-near-glyph', 120, true))
+    const text = node('span', 'arrive-near-text')
+    text.append(node('span', 'arrive-near-name', item.name || ''), node('span', 'arrive-near-day', shortDay(item)))
+    btn.append(cover, text)
+    btn.title = [item.name, item.artists].filter(Boolean).join(' · ')
+    btn.addEventListener('click', () => switchArrival(item))
+    list.append(btn)
+  }
+  around.append(list)
+  markArriveShelf(event)
+}
+function markArriveShelf(event) {
+  const list = $('arriveAround')?.querySelector('.arrive-shelf')
+  if (!list) return false
+  let found = false
+  for (const btn of list.children) {
+    const on = btn.dataset.id === String(event.song_id)
+    found ||= on
+    if (on) btn.setAttribute('aria-current', 'true')
+    else btn.removeAttribute('aria-current')
+  }
+  return found
+}
+function revealShelfItem(event) {
+  const list = $('arriveAround')?.querySelector('.arrive-shelf')
+  const btn = list && [...list.children].find(b => b.dataset.id === String(event.song_id))
+  if (!btn || list.scrollWidth <= list.clientWidth) return
+  const left = btn.offsetLeft - (list.clientWidth - btn.offsetWidth) / 2
+  list.scrollTo({ left: Math.max(0, left), behavior: motion && !reduced.matches ? 'smooth' : 'auto' })
+}
+function paintArriveActions() {
+  // Rerolling only makes sense for a random trip; "that day" already is the answer.
+  const reroll = $('arriveReroll')
+  const isRandom = travel.source !== 'today'
+  if (reroll) reroll.hidden = !isRandom
+  return isRandom ? reroll : $('arriveLocate')
+}
 function paintArriveNote(result) {
   const note = $('arriveNote')
   if (!note) return
@@ -1350,52 +1442,89 @@ function paintArriveNote(result) {
   note.textContent = msg
   note.hidden = !msg
 }
+function watchArriveNote(event) {
+  if (travel.play && typeof travel.play.then === 'function') {
+    travel.play.then(result => { if (travel.event === event) paintArriveNote(result) })
+  } else if (player?.note) paintArriveNote({ ok: false, error: player.note })
+  else paintArriveNote({ ok: Boolean(player?.playing && player?.current?.song_id === event.song_id) })
+}
 function showArrival(event) {
   if (!event) return
   const overlay = $('travelOverlay')
   overlay?.classList.add('is-arrive')
   overlay?.classList.remove('is-going')
   const leftover = $('travelHero')
-  if (leftover) { leftover.style.opacity = '0'; leftover.hidden = true }
+  if (leftover) { leftover._pose = null; leftover.style.opacity = '0'; leftover.hidden = true }
   const box = $('travelArrive')
   if (box) box.hidden = false
   paintArriveBg(event)
   paintArriveArt(event)
-  const when = `${dayLabel(event.date, true)}${event.time ? ` ${event.time}` : ''}`
-  const since = sinceLabel(event.first_listen_ms)
-  if ($('arriveWhen')) $('arriveWhen').textContent = since ? `${when} · ${since}` : when
-  if ($('travelTitle')) $('travelTitle').textContent = event.name
-  if ($('arriveArtists')) $('arriveArtists').textContent = event.artists || '歌手未知'
-  if (travel.play && typeof travel.play.then === 'function') {
-    travel.play.then(result => { if (travel.event === event) paintArriveNote(result) })
-  } else if (player?.note) paintArriveNote({ ok: false, error: player.note })
-  else paintArriveNote({ ok: Boolean(player?.playing && player?.current?.song_id === event.song_id) })
-  const around = $('arriveAround')
-  if (around) {
-    around.replaceChildren()
-    const near = nearbyFirsts(event)
-    if (near.length) {
-      around.append(node('p', 'arrive-around-label', '那时前后，你还初听了'))
-      const list = node('div', 'arrive-around-list')
-      near.forEach(item => {
-        const btn = node('button', 'arrive-chip')
-        btn.type = 'button'
-        const decoded = item.cover && travelArts.get(item.cover)
-        if (decoded) {
-          const thumb = node('span', 'arrive-chip-cover')
-          thumb.append(clonedArt(decoded))
-          btn.append(thumb)
-        } else {
-          btn.append(tile(item, 'arrive-chip-cover', 72, true))
-        }
-        btn.append(node('span', '', item.name))
-        btn.addEventListener('click', () => startTravel(item, { source: 'neighbor' }))
-        list.append(btn)
-      })
-      around.append(list)
-    }
+  paintArriveText(event)
+  watchArriveNote(event)
+  paintArriveShelf(event)
+  requestAnimationFrame(() => { const list = $('arriveAround')?.querySelector('.arrive-shelf'); const on = list?.querySelector('[aria-current]'); if (on && list.scrollWidth > list.clientWidth) list.scrollLeft = Math.max(0, on.offsetLeft - (list.clientWidth - on.offsetWidth) / 2) })
+  paintArriveActions()
+  queueMicrotask(() => { try { box?.focus({ preventScroll: true }) } catch {} })
+}
+// Moving to another song while already "there": no tunnel, the page slides sideways in time.
+function switchArrival(item, { play = true } = {}) {
+  if (!item || travel.phase !== 'arrive') return
+  const prev = travel.event
+  if (prev?.song_id === item.song_id) {
+    if (play && !(player?.playing && player?.current?.song_id === item.song_id)) travel.play = player?.play?.(item)
+    return
   }
-  queueMicrotask(() => { try { $('arriveReroll')?.focus() } catch {} })
+  travel.event = item
+  travel.toMs = item.first_listen_ms || travel.toMs
+  if (play) {
+    player?.unlock?.()
+    travel.play = player?.play?.(item)
+  } else {
+    travel.play = null
+  }
+  if (item.cover) decodeTravelCover(item.cover)
+  const dir = (item.first_listen_ms || 0) >= (prev?.first_listen_ms || 0) ? 1 : -1
+  const swap = () => {
+    paintArriveArt(item)
+    paintArriveText(item)
+    if ($('arriveNote')) $('arriveNote').hidden = true
+    watchArriveNote(item)
+    if (!markArriveShelf(item)) paintArriveShelf(item)
+    revealShelfItem(item)
+  }
+  paintArriveBg(item, { fade: true })
+  if (!motion || reduced.matches) { swap(); return }
+  const ease = 'cubic-bezier(.16, 1, .3, 1)'
+  // Cover: the old one stays on top as a ghost and drifts away while the new one settles in beneath.
+  const oldArt = $('arriveArt')
+  const lines = () => ['arriveWhen', 'travelTitle', 'arriveArtists'].map(id => id === 'arriveWhen' ? $(id)?.parentElement : $(id)).filter(Boolean)
+  const outs = lines().map((el, i) => el.animate(
+    [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${-dir * 16}px)` }],
+    { duration: 150, delay: i * 22, easing: 'cubic-bezier(.4, 0, 1, 1)', fill: 'forwards' }))
+  paintArriveArt(item)
+  const newArt = $('arriveArt')
+  if (oldArt && newArt && oldArt !== newArt) {
+    oldArt.removeAttribute('id')
+    oldArt.classList.add('is-ghost')
+    oldArt.setAttribute('aria-hidden', 'true')
+    newArt.after(oldArt)
+    oldArt.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${-dir * 40}px) scale(.94)` }],
+      { duration: 420, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'forwards' }).finished.finally(() => oldArt.remove())
+    newArt.animate([{ opacity: 0, transform: `translateX(${dir * 48}px) scale(.94)` }, { opacity: 1, transform: 'none' }],
+      { duration: 640, delay: 60, easing: ease, fill: 'backwards' })
+  }
+  if (!markArriveShelf(item)) paintArriveShelf(item)
+  revealShelfItem(item)
+  Promise.all(outs.map(an => an.finished.catch(() => {}))).then(() => {
+    if (travel.event !== item) return
+    outs.forEach(an => an.cancel())
+    paintArriveText(item)
+    if ($('arriveNote')) $('arriveNote').hidden = true
+    watchArriveNote(item)
+    lines().forEach((el, i) => el.animate(
+      [{ opacity: 0, transform: `translateX(${dir * 22}px)` }, { opacity: 1, transform: 'none' }],
+      { duration: 560, delay: i * 50, easing: ease, fill: 'backwards' }))
+  })
 }
 function finishGoing() {
   travel.phase = 'arrive'
@@ -2107,6 +2236,10 @@ function playRelative(delta) {
   const next = playerAt(player.current, delta)
   if (!next) return
   if ($('songDialog').open && state.view[state.current]?.song_id === player.current?.song_id) fillSong(next)
+  if (travel.open && travel.phase === 'arrive' && travel.event?.song_id === player.current?.song_id) {
+    switchArrival(next)
+    return
+  }
   player.play(next)
 }
 player = createPlayer({
