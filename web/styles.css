@@ -183,8 +183,20 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 @media (max-width: 1100px) { main { overflow-x: clip } } /* 光晕不撑宽手机视口 */
 
 /* ---------- 开场 ---------- */
-.hero { --cover: var(--accent); min-height: calc(100vh - var(--bar)); min-height: calc(100svh - var(--bar)); padding: 8vh 0 64px; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 48px; position: relative; transition: --cover 1.2s ease }
+.hero { --cover: var(--accent); min-height: calc(100vh - var(--bar)); min-height: calc(100svh - var(--bar)); padding: 8vh 0 64px; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 48px; position: relative; overflow-x: clip; transition: --cover 1.2s ease }
 .hero.has-highlights { grid-template-columns: minmax(0, 1fr) 380px }
+/* 已有档案时：左栏内容变长，不要再垂直居中右侧唱片（标题旁会空一大块），
+   并收一收间距，让「往下翻」在 1440×900 桌面上还能看见。 */
+.hero:has(#heroCapsule:not([hidden])) {
+  align-items: start;
+  padding: 5vh 0 40px;
+  gap: 36px;
+}
+.hero:has(#heroCapsule:not([hidden])) .hero-story { margin-top: 28px }
+.hero:has(#heroCapsule:not([hidden])) .hero-sub { margin-top: 14px }
+.hero:has(#heroCapsule:not([hidden])) .hero-actions { margin-top: 24px }
+.hero:has(#heroCapsule:not([hidden])) .highlights { margin-top: clamp(36px, 7vh, 84px) }
+
 .hero::before { content: ""; position: absolute; right: -10%; top: 6%; width: 60%; aspect-ratio: 1; border-radius: 50%; z-index: -1; pointer-events: none; background: radial-gradient(closest-side, color-mix(in oklab, var(--cover) 34%, transparent), transparent); opacity: 0; transition: opacity 1s }
 .hero.has-highlights::before { opacity: var(--glow-o) }
 .hero-text { min-width: 0 }
@@ -203,8 +215,8 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
   .hero-tagline { animation: blur-in var(--d-5) var(--ease) both calc(var(--stagger) * 7) }
   .hero-story, .hero-sub, .hero-actions { animation: rise-in var(--d-4) var(--ease) both }
   .hero-story { animation-delay: calc(var(--stagger) * 9) }
-  .hero-sub { animation-delay: calc(var(--stagger) * 11) }
-  .hero-actions { animation-delay: calc(var(--stagger) * 12) }
+  .hero-sub { animation-delay: calc(var(--stagger) * 10) }
+  .hero-actions { animation-delay: calc(var(--stagger) * 14) }
   .highlights:not([hidden]) .hl-controls { animation: rise-in var(--d-4) var(--ease) both calc(var(--stagger) * 14) }
 }
 @keyframes char-in { from { opacity: 0; transform: translateY(.42em) rotate(7deg) scale(.9) } }
@@ -219,7 +231,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 
 .hero-tagline { font-family: var(--serif); font-size: clamp(17px, 1.6vw, 21px); line-height: 1.6; color: var(--ink-2); margin: 26px 0 0; max-width: 30em; letter-spacing: .02em }
 .hero-tagline::before { content: ""; display: inline-block; vertical-align: middle; width: 28px; height: 1px; margin: -.2em 12px 0 0; background: var(--accent) }
-.hero-story { font-family: var(--serif); font-size: clamp(22px, 2.4vw, 31px); line-height: 1.72; max-width: 22em; margin: 40px 0 0; color: var(--ink); text-wrap: pretty; min-height: 3.4em }
+.hero-story { font-family: var(--serif); font-size: clamp(22px, 2.4vw, 31px); line-height: 1.72; max-width: 22em; margin: 40px 0 0; color: var(--ink); text-wrap: pretty; word-break: keep-all; min-height: 3.4em }
 .hero-story .num { font-family: var(--display); font-weight: 700; font-size: 1.5em; line-height: 1; color: var(--accent); font-variant-numeric: lining-nums tabular-nums; padding: 0 .08em; letter-spacing: -.01em }
 .hero-story .mark, .chapter-story .mark { white-space: nowrap; font-weight: 700; background: linear-gradient(transparent 64%, var(--accent-soft) 64%, var(--accent-soft) 92%, transparent 92%); padding: 0 .08em }
 .hero-story .mark.wrap { white-space: normal }
@@ -613,6 +625,11 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hero-story .num { font-size: 1.35em }
   .hero-sub { font-size: 14px }
   .hero-actions { margin-top: 26px; gap: 18px }
+  .hero:has(#heroCapsule:not([hidden])) { padding: 6vh 0 32px; gap: 28px }
+  .hero:has(#heroCapsule:not([hidden])) .highlights { margin-top: 0 }
+  .hero-capsule { margin-top: 20px; padding-top: 16px; max-width: none }
+  .hero-capsule-line { font-size: 16px }
+  .hero-capsule-actions .button { flex: 1 1 calc(50% - 8px); min-width: 0; padding: 8px 10px; font-size: 13px }
   .sync-line { margin-top: 32px; font-size: 13.5px }
   .highlights { padding: 14px; border-radius: 20px }
   .hl-stage { height: 128px }
@@ -658,6 +675,9 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .compact .chapter { padding-top: 40px }
   .compact .chapter-numeral { font-size: 56px; margin-bottom: 12px }
   .compact .chapter-title { font-size: 26px }
+  #shareDialog { width: min(360px, calc(100% - 20px)); padding: 14px 14px 16px }
+  #shareDialog h2 { font-size: 18px }
+  .share-canvas { max-height: min(68vh, calc(100dvh - 200px)); border-radius: 8px }
   dialog { padding: 26px 20px 22px; border-radius: 22px }
   dialog h2 { font-size: 25px }
   dialog.sheet { margin: auto 0 0; width: 100%; height: auto; max-height: 90%; border-radius: 24px 24px 0 0; border-width: 1px 0 0; padding: 24px 20px calc(28px + env(safe-area-inset-bottom)) }
@@ -868,13 +888,104 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 
 /* ---------- 顶栏 GitHub / 分享海报 ---------- */
 .github svg { width: 16px; height: 16px; fill: currentColor; stroke: none }
-#shareDialog { width: min(460px, calc(100% - 28px)); overflow: auto }
-.share-stage { display: grid; place-items: center; background: #0c0b09; border-radius: 18px; padding: 12px; min-height: 160px }
-.share-canvas { display: block; width: min(100%, 280px); height: auto; aspect-ratio: 9 / 16; border-radius: 8px; box-shadow: 0 18px 40px rgb(0 0 0 / .4) }
-.share-status { margin: 12px 0 0; color: var(--muted); font-size: 13px; text-align: center }
+#shareDialog {
+  --share-ink: #f3eee6;
+  --share-mute: rgb(243 238 230 / .58);
+  position: relative;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  padding: 18px 18px 16px;
+  color: var(--share-ink);
+  background-color: #16140f;
+  background-image:
+    radial-gradient(120% 80% at 50% -10%, rgb(243 238 230 / .07), transparent 46%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.95 0 0 0 0 0.93 0 0 0 0 0.88 0 0 0 .16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-blend-mode: normal, overlay;
+  border: 1px solid rgb(243 238 230 / .1);
+  box-shadow: 0 28px 80px -28px rgb(0 0 0 / .7);
+}
+#shareDialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+#shareDialog .dialog-close {
+  color: rgb(243 238 230 / .72);
+  border-color: rgb(243 238 230 / .18);
+  background: rgb(12 11 10 / .35);
+}
+#shareDialog .dialog-close:hover:not(:disabled) {
+  color: var(--share-ink);
+  border-color: rgb(243 238 230 / .42);
+  background: rgb(243 238 230 / .08);
+  transform: scale(1.06);
+}
+.share-stage {
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  min-height: 0;
+}
+.share-stage[aria-busy="true"] { min-height: 120px }
+.share-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(72vh, calc(100dvh - 220px));
+  aspect-ratio: 9 / 16;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 22px 48px rgb(0 0 0 / .48), 0 0 0 1px rgb(243 238 230 / .06);
+}
+.share-head { margin-top: 14px }
+#shareDialog h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  margin: 0 36px 0 0;
+  color: var(--share-ink);
+}
+#shareDialog .dialog-copy {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--share-mute);
+}
+.share-status { margin: 10px 0 0; color: var(--share-mute); font-size: 13px; text-align: center }
 .share-status[hidden] { display: none }
-.share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px }
-.share-actions .button { flex: 1 1 auto }
+.share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px }
+.share-actions .button { flex: 1 1 auto; min-height: 40px }
+#shareDialog .share-actions .button.primary {
+  background: #f3eee6;
+  color: #141210;
+  border-color: transparent;
+}
+#shareDialog .share-actions .button.primary:hover:not(:disabled) {
+  background: #fffaf3;
+  color: #141210;
+  box-shadow: none;
+}
+#shareDialog .share-actions .button.ghost {
+  border-color: rgb(243 238 230 / .22);
+  color: var(--share-ink);
+  background: rgb(243 238 230 / .06);
+}
+#shareDialog .share-actions .button.ghost:hover:not(:disabled) {
+  background: rgb(243 238 230 / .14);
+  color: var(--share-ink);
+  border-color: rgb(243 238 230 / .4);
+}
+@media (prefers-reduced-motion: no-preference) {
+  #shareDialog[open]:not(.is-closing) { animation: share-dialog-in .55s var(--ease) }
+  #shareDialog[open]:not(.is-closing) .share-stage { animation: share-poster-in .7s var(--spring-soft) both }
+  #shareDialog[open]:not(.is-closing) .share-head { animation: rise-in .45s var(--ease) both; animation-delay: 70ms }
+  #shareDialog[open]:not(.is-closing) .share-actions { animation: rise-in .5s var(--ease) both; animation-delay: 120ms }
+  #shareDialog.is-closing { animation: share-dialog-out .22s var(--ease-in) forwards }
+}
+@keyframes share-dialog-in { from { opacity: 0; transform: translateY(26px) scale(.97) } }
+@keyframes share-poster-in { from { opacity: 0; transform: translateY(16px) scale(.975); filter: blur(5px) } }
+@keyframes share-dialog-out { to { opacity: 0; transform: translateY(12px) scale(.985) } }
 
 /* 定位：在时间线里轻轻圈出正在听的那一首，只用描边和缩放 */
 .song.is-locate {
@@ -923,13 +1034,14 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 }
 
 /* 首页英雄上的时光胶囊入口：一条细线隔开正文，不和右侧唱片抢视线 */
-.hero-capsule { margin-top: 30px; padding-top: 22px; border-top: 1px solid var(--line); max-width: 34em }
+.hero-capsule { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); max-width: 34em }
 .hero-capsule[hidden] { display: none }
 .hero-capsule-kicker { margin: 0 0 8px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; color: var(--accent) }
 .hero-capsule-line { margin: 0 0 14px; font-family: var(--serif); font-size: clamp(17px, 1.55vw, 20px); line-height: 1.5; color: var(--ink) }
-.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px }
+.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px }
+.hero-capsule-actions .button { min-height: 40px; padding: 8px 16px }
 @media (prefers-reduced-motion: no-preference) {
-  .hero-capsule { animation: rise-in var(--d-4) var(--ease) both; animation-delay: calc(var(--stagger) * 11.5) }
+  .hero-capsule { animation: rise-in var(--d-4) var(--ease) both; animation-delay: calc(var(--stagger) * 12) }
 }
 
 /* 胶囊面板：顶上一溜封面，像从胶片里抽出来 */

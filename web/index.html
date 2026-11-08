@@ -63,8 +63,8 @@
           <p class="hero-capsule-kicker">时光胶囊</p>
           <p class="hero-capsule-line" id="heroCapsuleLine"></p>
           <div class="hero-capsule-actions">
-            <button type="button" class="button ghost" id="heroTravelToday" hidden>穿越</button>
-            <button type="button" class="text-button" id="heroTravelRandom">随机回到过去</button>
+            <button type="button" class="button ghost" id="heroTravelToday" hidden title="回到过去某年的同一天">历史上的今天</button>
+            <button type="button" class="button ghost" id="heroTravelRandom" title="不挑日子，随便抽一个第一次">随机回到过去</button>
           </div>
         </div>
         <div class="hero-actions">
@@ -188,12 +188,13 @@
     </section>
   </dialog>
 
-  <dialog id="shareDialog" aria-labelledby="shareTitle">
+  <dialog id="shareDialog" class="share-sheet" aria-labelledby="shareTitle">
     <button type="button" class="dialog-close icon-button" id="closeShare" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
-    <p class="kicker">分享</p>
-    <h2 id="shareTitle">初听海报</h2>
-    <p class="dialog-copy">画在这台设备上。没有链接，也不会上传。</p>
     <div class="share-stage" id="shareStage" aria-busy="false"></div>
+    <header class="share-head">
+      <h2 id="shareTitle">初听海报</h2>
+      <p class="dialog-copy">画在这台设备上。没有链接，也不会上传。</p>
+    </header>
     <p id="shareStatus" class="share-status" role="status">正在排版海报…</p>
     <div class="share-actions">
       <button type="button" class="button primary" id="shareSave" disabled>保存图片</button>
@@ -245,8 +246,8 @@
     <p class="kicker">音乐时光胶囊</p>
     <h2 id="capsuleTitle">回到某一次初听</h2>
     <div class="capsule-modes" role="tablist" aria-label="胶囊方式">
-      <button type="button" id="capsuleTodayBtn" role="tab" aria-selected="true">历史上的今天</button>
-      <button type="button" id="capsuleRandomBtn" role="tab" aria-selected="false">随机回到过去</button>
+      <button type="button" id="capsuleTodayBtn" role="tab" aria-selected="true" title="回到过去某年的同一天">历史上的今天</button>
+      <button type="button" id="capsuleRandomBtn" role="tab" aria-selected="false" title="不挑日子，随便抽一个第一次">随机回到过去</button>
     </div>
     <div id="capsuleBody" class="capsule-body"></div>
   </dialog>
