@@ -99,7 +99,7 @@ function install(canPlay = '') {
 }
 
 test('playErrorMessage does not call every code-4 failure a format problem', () => {
-  assert.equal(playErrorMessage({ name: 'NotAllowedError' }), '')
+  assert.equal(playErrorMessage({ name: 'NotAllowedError' }), null)
   assert.equal(playErrorMessage({ name: 'AbortError' }), null)
   assert.equal(playErrorMessage({ name: 'NotSupportedError' }, { code: 4 }, { url: 'https://m801.music.126.net/a.mp3', type: 'mp3' }), PLAYER_LINES.failed)
   assert.equal(playErrorMessage({ name: 'Error' }, { code: 4 }, { url: 'https://m801.music.126.net/a.flac', type: 'flac' }), PLAYER_LINES.unsupported)
@@ -478,6 +478,56 @@ test('a cloud upload that later returns standard mp3 plays after the encode fall
     assert.equal(env.audio().src, 'https://m801.music.126.net/ok.mp3')
     assert.equal(player.playing, true)
     assert.equal(note.textContent.includes('格式') || note.textContent.includes('没放出来'), false)
+  } finally {
+    env.restore()
+  }
+})
+
+test('NotAllowedError does not count as unplayable and does not auto-skip', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    let seen = 0
+    const player = createPlayer({
+      els, mini,
+      getUrl: async () => ({ url: 'https://m801.music.126.net/ok.mp3', type: 'mp3', duration: 180000 }),
+      coverFor: () => null,
+      onEnded() {},
+      onOpen() {},
+      onUnplayable() { seen += 1 }
+    })
+    env.audio()._fail = 'NotAllowedError'
+    const result = await player.play({ song_id: 'ios', name: '手势外' })
+    assert.equal(result.ok, false)
+    assert.equal(result.blocked, true)
+    assert.equal(result.reason, 'blocked')
+    assert.equal(result.error, '')
+    assert.equal(seen, 0)
+    assert.equal(player.playing, false)
+    assert.equal(player.current.song_id, 'ios')
+    assert.equal(player.note, '')
+  } finally {
+    env.restore()
+  }
+})
+
+test('unlock does not replace a real source with a silent clip', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    const player = createPlayer({
+      els, mini,
+      getUrl: async () => ({ url: 'https://m801.music.126.net/ok.mp3', type: 'mp3', duration: 180000 }),
+      coverFor: () => null,
+      onEnded() {},
+      onOpen() {}
+    })
+    await player.play({ song_id: 'a', name: '甲' })
+    const src = env.audio().src
+    assert.ok(src.includes('ok.mp3'))
+    player.unlock()
+    assert.equal(env.audio().src, src)
+    assert.equal(src.startsWith('data:'), false)
   } finally {
     env.restore()
   }
