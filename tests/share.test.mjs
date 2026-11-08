@@ -39,6 +39,28 @@ function keys(value, found = []) {
   }
   return found
 }
+function assertWall(poster) {
+  assert.equal(poster.wall.length, 66)
+  assert.equal(poster.wall.filter(slot => slot.first).length, 1)
+  assert.equal(poster.wall[0].first, true)
+  assert.equal(poster.wall[0].cover, poster.first.cover)
+  const covers = [...new Set(poster.wall.map(slot => slot.cover).filter(Boolean))]
+  if (covers.length) assert.ok(poster.wall.slice(1).every(slot => slot.cover), 'blank tiles are filled when any cover exists')
+  const cols = 6
+  for (let i = 0; i < poster.wall.length; i++) {
+    const cover = poster.wall[i].cover
+    if (!cover) continue
+    const others = covers.filter(item => item !== cover)
+    if (!others.length) continue
+    const nextTo = []
+    if (i % cols) nextTo.push(poster.wall[i - 1].cover)
+    if (i % cols !== cols - 1 && i + 1 < poster.wall.length) nextTo.push(poster.wall[i + 1].cover)
+    if (i >= cols) nextTo.push(poster.wall[i - cols].cover)
+    if (i + cols < poster.wall.length) nextTo.push(poster.wall[i + cols].cover)
+    for (const other of nextTo) assert.notEqual(other, cover, `adjacent duplicate at ${i}`)
+  }
+}
+
 function assertPrivate(payload) {
   const blob = JSON.stringify(payload)
   for (const secret of Object.values(SECRET)) assert.equal(blob.includes(secret), false, secret)
@@ -103,17 +125,27 @@ test('share payload keeps poster facts and drops account, cookie, session, and r
   assert.equal(poster.hours[22], 6)
   assert.equal(poster.rangeLabel, '初听 · 2024.01.02 — 2026.11.04')
   assert.equal(poster.site, 'chuting.inkorange.com')
-  assert.equal(poster.wall.length, 66)
-  assert.equal(poster.wall.filter(slot => slot.first).length, 1)
-  assert.equal(poster.wall[0].cover, poster.first.cover)
-  assert.equal(poster.wall[9].cover, poster.wall[0].cover)
-  assert.equal(poster.wall[3].cover, '')
+  assert.equal(poster.mostPlayed.label, 'MOST PLAYED')
+  assertWall(poster)
   assert.match(text, /晴天/)
   assert.match(text, /260 次/)
   assert.match(text, /chuting\.inkorange\.com/)
   assert.equal(text.includes(cjk), false)
   assert.equal(text.includes(SECRET.uid), false)
   assert.ok(text.length < 500)
+})
+
+test('the album wall skips blank sleeves and does not tile the same cover next to itself', () => {
+  const payload = sharePayload({ events: [
+    { song_id: '1', name: '甲', artists: '甲', date: '2024-01-01', time: '10:00', play_count: 1, cover: 'https://p1.music.126.net/ok/a.jpg' },
+    { song_id: '2', name: '乙', artists: '乙', date: '2024-01-02', time: '11:00', play_count: 1, cover: '' },
+    { song_id: '3', name: '丙', artists: '丙', date: '2024-01-03', time: '12:00', play_count: 1, cover: 'https://p1.music.126.net/ok/a.jpg' },
+    { song_id: '4', name: '丁', artists: '丁', date: '2024-01-04', time: '13:00', play_count: 1, cover: 'https://p2.music.126.net/ok/b.jpg' },
+    { song_id: '5', name: '戊', artists: '戊', date: '2024-01-05', time: '14:00', play_count: 1, cover: 'javascript:alert(1)' },
+  ] })
+  assertWall(payload.poster)
+  const covers = new Set(payload.poster.wall.map(slot => slot.cover))
+  assert.deepEqual([...covers].sort(), ['https://p1.music.126.net/ok/a.jpg', 'https://p2.music.126.net/ok/b.jpg'])
 })
 
 test('one song, a missing album, and a missing cover still make a poster', () => {

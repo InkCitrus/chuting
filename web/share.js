@@ -84,6 +84,54 @@ function coverOf(songs) {
   return ''
 }
 
+// Fill a 6×11 wall with as many distinct covers as possible. The first listen stays
+// in the highlighted corner; empty tiles are avoided when any real cover exists, and
+// the same cover is not placed on a 4-adjacent neighbour unless it is the only choice.
+function buildWall(events) {
+  const cols = 6
+  const firstCover = events[0]?.cover || ''
+  const unique = []
+  const seen = new Set()
+  for (const event of events) {
+    const cover = event.cover || ''
+    if (!cover || seen.has(cover)) continue
+    seen.add(cover)
+    unique.push(cover)
+  }
+  const wall = Array.from({ length: WALL }, (_, i) => ({ cover: '', first: i === 0 }))
+  wall[0].cover = firstCover
+  if (!unique.length) return wall
+
+  const lastAt = (cover, i) => {
+    for (let j = i - 1; j >= 0; j--) if (wall[j].cover === cover) return j
+    return -Infinity
+  }
+  const pick = i => {
+    const left = i % cols !== 0 ? wall[i - 1].cover : ''
+    const above = i >= cols ? wall[i - cols].cover : ''
+    const used = new Set()
+    for (let j = 0; j < i; j++) if (wall[j].cover) used.add(wall[j].cover)
+    const unused = unique.filter(cover => !used.has(cover) && cover !== left && cover !== above)
+    if (unused.length) return unused[0]
+    let best = '', bestScore = -1
+    for (const cover of unique) {
+      if (cover === left || cover === above) continue
+      const score = i - lastAt(cover, i)
+      if (score > bestScore) { best = cover; bestScore = score }
+    }
+    if (best) return best
+    let fallback = unique[0], fallbackScore = -1
+    for (const cover of unique) {
+      const score = i - lastAt(cover, i)
+      if (score > fallbackScore) { fallback = cover; fallbackScore = score }
+    }
+    return fallback
+  }
+
+  for (let i = 1; i < WALL; i++) wall[i].cover = pick(i)
+  return wall
+}
+
 // Only display fields are copied. Anything else on the archive (account, raw, cookies) is ignored.
 function sanitizeEvents(archive) {
   const rows = Array.isArray(archive) ? archive : archive?.events || archive?.songs || []
@@ -149,8 +197,6 @@ export function posterFrom(events) {
   let peak = 0
   for (let h = 1; h < 24; h++) if (hours[h] >= hours[peak]) peak = h
   const start = dotted(first.date), end = dotted(latest.date)
-  const wall = []
-  for (let i = 0; i < WALL; i++) wall.push({ cover: events[i % events.length].cover || '', first: i === 0 })
   return {
     songs: events.length,
     artists: people(events),
@@ -184,7 +230,7 @@ export function posterFrom(events) {
       cover: coverOf(metList),
     },
     latest: card(latest, { label: 'LATEST', value: latest.date.slice(5).replace('-', '.'), unit: latest.time }),
-    wall,
+    wall: buildWall(events),
   }
 }
 
@@ -255,9 +301,11 @@ async function waitForFonts() {
     await document.fonts.ready
     await Promise.all([
       document.fonts.load(`600 50px ${SERIF}`),
-      document.fonts.load(`400 14px ${SERIF}`),
-      document.fonts.load(`300 30px ${MONO}`),
-      document.fonts.load(`500 11px ${MONO}`),
+      document.fonts.load(`400 15px ${SERIF}`),
+      document.fonts.load(`300 34px ${MONO}`),
+      document.fonts.load(`500 12px ${MONO}`),
+      document.fonts.load(`500 10px ${MONO}`),
+      document.fonts.load(`500 9px ${MONO}`),
     ])
     await document.fonts.ready
   } catch { /* draw with whatever is already available */ }
@@ -344,34 +392,37 @@ function wrapClamp(ctx, text, maxWidth, maxLines, spacing) {
   }
   return lines
 }
+function tokensOf(text) {
+  return text.match(/[A-Za-z0-9][A-Za-z0-9''.+-]*|[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]|./gu) || [text]
+}
 function wrapSmart(ctx, text, maxWidth, maxLines, spacing) {
-  if (/[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(text) || !text.includes(' ')) return wrapClamp(ctx, text, maxWidth, maxLines, spacing)
-  const words = text.split(' ')
+  const tokens = tokensOf(text)
+  if (tokens.length <= 1) return wrapClamp(ctx, text, maxWidth, maxLines, spacing)
   const lines = []
   let buf = '', index = 0
-  while (index < words.length && lines.length < maxLines) {
-    const next = buf ? `${buf} ${words[index]}` : words[index]
+  while (index < tokens.length && lines.length < maxLines) {
+    const next = buf + tokens[index]
     if (widthOf(ctx, next, spacing) <= maxWidth) { buf = next; index++; continue }
     if (buf) { lines.push(buf); buf = ''; continue }
-    lines.push(wrapClamp(ctx, words[index], maxWidth, 1, spacing)[0] || words[index])
+    lines.push(wrapClamp(ctx, tokens[index], maxWidth, 1, spacing)[0] || tokens[index])
     index++
     buf = ''
   }
   if (buf && lines.length < maxLines) lines.push(buf)
-  if (index < words.length && lines.length) {
+  if (index < tokens.length && lines.length) {
     let last = lines[lines.length - 1]
     while (last && widthOf(ctx, `${last}…`, spacing) > maxWidth) last = [...last].slice(0, -1).join('')
-    lines[lines.length - 1] = `${last}…`
+    lines[lines.length - 1] = last ? `${last}…` : '…'
   }
   return lines
 }
 
-function traceNotched(ctx, w, h, kind) {
+function traceNotched(ctx, w, h, kind, notch) {
   const r = kind === 'mini' ? 3 : 6
   const nr = kind === 'mini' ? 5 : 9
   ctx.beginPath()
   if (kind === 'mini') {
-    const ny = 76
+    const ny = notch ?? Math.round(h * 0.69)
     ctx.moveTo(r, 0)
     ctx.lineTo(w - r, 0)
     ctx.arcTo(w, 0, w, r, r)
@@ -412,9 +463,9 @@ function place(ctx, x, y, w, h, deg, tx, ty, draw) {
   draw(ctx, w, h)
   ctx.restore()
 }
-function grain(ctx, w, h, kind, alpha) {
+function grain(ctx, w, h, kind, alpha, notch) {
   ctx.save()
-  traceNotched(ctx, w, h, kind)
+  traceNotched(ctx, w, h, kind, notch)
   ctx.clip()
   ctx.globalAlpha = alpha
   ctx.globalCompositeOperation = 'multiply'
@@ -430,7 +481,7 @@ function drawImageCover(ctx, img, x, y, w, h) {
   if (ir > r) { sw = ih * r; sx = (iw - sw) / 2 } else { sh = iw / r; sy = (ih - sh) / 2 }
   ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h)
 }
-function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#26221e' } = {}) {
+function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#14120f', pad = 0 } = {}) {
   ctx.save()
   ctx.beginPath()
   ctx.rect(x, y, w, h)
@@ -438,7 +489,7 @@ function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#26
   if (img) {
     try {
       if (filter) ctx.filter = filter
-      drawImageCover(ctx, img, x, y, w, h)
+      drawImageCover(ctx, img, x - pad, y - pad, w + pad * 2, h + pad * 2)
       ctx.filter = 'none'
     } catch { ctx.filter = 'none'; ctx.fillStyle = tone; ctx.fillRect(x, y, w, h) }
   } else {
@@ -479,13 +530,37 @@ function layoutTitle(ctx, text, maxWidth) {
   return { size, spacing, lines: wrapSmart(ctx, text, maxWidth, 2, spacing) }
 }
 
+function neighborImage(images, wall, index, cols) {
+  const tryAt = (j, sameRow) => {
+    if (j < 0 || j >= wall.length) return null
+    if (sameRow && Math.floor(j / cols) !== Math.floor(index / cols)) return null
+    return (wall[j].cover && images.get(wall[j].cover)) || null
+  }
+  return (
+    tryAt(index - 1, true) || tryAt(index + 1, true) ||
+    tryAt(index - cols, false) || tryAt(index + cols, false) ||
+    tryAt(index - cols - 1, false) || tryAt(index - cols + 1, false) ||
+    tryAt(index + cols - 1, false) || tryAt(index + cols + 1, false) ||
+    wall.map(slot => slot.cover && images.get(slot.cover)).find(Boolean) ||
+    null
+  )
+}
 function drawWall(ctx, poster, images) {
   const gap = 3, cols = 6, tile = (552 - gap * (cols - 1)) / cols
   poster.wall.forEach((slot, i) => {
     const x = -6 + (i % cols) * (tile + gap)
     const y = -6 + Math.floor(i / cols) * (tile + gap)
-    const img = slot.cover ? images.get(slot.cover) : null
-    paintCover(ctx, img, x, y, tile, tile, { filter: slot.first ? '' : 'saturate(0.9) brightness(0.82)' })
+    let img = slot.cover ? images.get(slot.cover) : null
+    let filter = slot.first ? '' : 'saturate(0.9) brightness(0.82)'
+    let pad = 0
+    if (!img) {
+      img = neighborImage(images, poster.wall, i, cols)
+      if (img) {
+        filter = 'saturate(0.55) brightness(0.3) blur(12px)'
+        pad = 10
+      }
+    }
+    paintCover(ctx, img, x, y, tile, tile, { filter, tone: '#14120f', pad })
     if (slot.first) {
       ctx.save()
       ctx.strokeStyle = ACCENT
@@ -498,10 +573,10 @@ function drawWall(ctx, poster, images) {
 function drawFade(ctx) {
   const fade = ctx.createLinearGradient(0, 0, 0, 960)
   fade.addColorStop(0, 'rgba(12,11,9,0)')
-  fade.addColorStop(0.12, 'rgba(12,11,9,0)')
-  fade.addColorStop(0.24, 'rgba(12,11,9,0)')
-  fade.addColorStop(0.46, 'rgba(12,11,9,0.85)')
-  fade.addColorStop(0.58, NIGHT)
+  fade.addColorStop(0.20, 'rgba(12,11,9,0)')
+  fade.addColorStop(0.34, 'rgba(12,11,9,0.16)')
+  fade.addColorStop(0.48, 'rgba(12,11,9,0.66)')
+  fade.addColorStop(0.60, NIGHT)
   fade.addColorStop(1, NIGHT)
   ctx.fillStyle = fade
   ctx.fillRect(0, 0, 540, 960)
@@ -529,11 +604,11 @@ function drawMainInk(ctx, w, h, poster) {
   ctx.textAlign = 'left'
   ctx.fillStyle = ACCENT
   ctx.beginPath()
-  ctx.arc(26 + 3, 22 + 5, 3, 0, Math.PI * 2)
+  ctx.arc(26 + 3, 22 + 6, 3, 0, Math.PI * 2)
   ctx.fill()
-  ctx.font = `500 9px ${MONO}`
+  ctx.font = `500 10px ${MONO}`
   ctx.fillStyle = ACCENT
-  fillSpaced(ctx, 'ADMIT ONE · 第一次听见', 26 + 6 + 8, 22, 9 * 0.14)
+  fillSpaced(ctx, 'ADMIT ONE · 第一次听见', 26 + 6 + 8, 22, 10 * 0.12)
 
   const title = layoutTitle(ctx, poster.first.title, textW)
   ctx.font = `600 ${title.size}px ${SERIF}`
@@ -542,10 +617,10 @@ function drawMainInk(ctx, w, h, poster) {
   const titleTop = 48
   title.lines.forEach((line, i) => fillSpaced(ctx, line, 26, titleTop + i * title.size * 1.12, title.spacing))
 
-  ctx.font = `400 14px ${SERIF}`
+  ctx.font = `400 15px ${SERIF}`
   ctx.fillStyle = MUTED
   const creditTop = titleTop + title.lines.length * title.size * 1.12 + 6
-  fillSpaced(ctx, ellipsis(ctx, poster.first.credit, textW, 14 * 0.1), 26, creditTop, 14 * 0.1)
+  fillSpaced(ctx, ellipsis(ctx, poster.first.credit, textW, 15 * 0.08), 26, creditTop, 15 * 0.08)
 
   const rowBottom = h - 20
   const borderY = rowBottom - 16
@@ -556,17 +631,17 @@ function drawMainInk(ctx, w, h, poster) {
   ctx.moveTo(26, borderY)
   ctx.lineTo(322, borderY)
   ctx.stroke()
-  ctx.font = `500 11px ${MONO}`
+  ctx.font = `500 12px ${MONO}`
   ctx.textBaseline = 'alphabetic'
   ctx.fillStyle = INK
   const base = rowBottom - 2
-  const tracking = 11 * 0.08
+  const tracking = 12 * 0.06
   fillSpaced(ctx, poster.first.date, 26, base, tracking)
-  ctx.font = `400 11px ${MONO}`
+  ctx.font = `400 12px ${MONO}`
   ctx.fillStyle = FAINT
   ctx.textAlign = 'center'
   fillSpaced(ctx, poster.first.weekday, (26 + 322) / 2, base, tracking)
-  ctx.font = `500 11px ${MONO}`
+  ctx.font = `500 12px ${MONO}`
   ctx.fillStyle = INK
   ctx.textAlign = 'right'
   fillSpaced(ctx, poster.first.time, 322, base, tracking)
@@ -575,15 +650,15 @@ function drawMainInk(ctx, w, h, poster) {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
   ctx.fillStyle = FAINT
-  ctx.font = `400 8px ${MONO}`
-  fillSpaced(ctx, 'Nº', stubMid, 46, 8 * 0.14)
+  ctx.font = `400 10px ${MONO}`
+  fillSpaced(ctx, 'Nº', stubMid, 42, 10 * 0.14)
   ctx.fillStyle = INK
-  ctx.font = `300 30px ${MONO}`
-  fillSpaced(ctx, poster.stub.number, stubMid, 64, 30 * 0.02)
-  barcode(ctx, stubMid - 35, 108, 70, 26)
+  ctx.font = `300 34px ${MONO}`
+  fillSpaced(ctx, poster.stub.number, stubMid, 64, 34 * 0.02)
+  barcode(ctx, stubMid - 36, 114, 72, 28)
   ctx.fillStyle = FAINT
-  ctx.font = `400 8px ${MONO}`
-  fillSpaced(ctx, `OF ${poster.stub.of}`, stubMid, 146, 8 * 0.14)
+  ctx.font = `400 10px ${MONO}`
+  fillSpaced(ctx, `OF ${poster.stub.of}`, stubMid, 154, 10 * 0.14)
   ctx.textAlign = 'left'
 }
 function drawMain(ctx, poster) {
@@ -608,144 +683,148 @@ function drawMain(ctx, poster) {
   place(ctx, x, y, w, h, -2.2, 0, 0, c => drawMainInk(c, w, h, poster))
 }
 function drawMini(ctx, card, index, images) {
-  const w = 152, h = 116, gap = 12
-  const x = 30 + index * (w + gap), y = 572
-  const deg = [-1.6, 1.2, -0.8][index]
+  const inset = 32, gap = 12, w = 151, h = 124
+  const x = inset + index * (w + gap), y = 560
+  const deg = [-1.4, 1.1, -0.7][index]
+  const notchY = 86
   ctx.save()
   ctx.shadowColor = 'rgba(0,0,0,.48)'
   ctx.shadowBlur = 16
   ctx.shadowOffsetY = 10
   place(ctx, x, y, w, h, deg, 0, 0, c => {
-    traceNotched(c, w, h, 'mini')
+    traceNotched(c, w, h, 'mini', notchY)
     c.fillStyle = PAPER
     c.fill()
   })
   ctx.restore()
   place(ctx, x, y, w, h, deg, 0, 0, c => {
-    grain(c, w, h, 'mini', 0.16)
+    grain(c, w, h, 'mini', 0.16, notchY)
     c.save()
     c.strokeStyle = DASH_MINI
     c.lineWidth = 1
     c.setLineDash([2, 2.2])
     c.beginPath()
-    c.moveTo(11, 76)
-    c.lineTo(w - 11, 76)
+    c.moveTo(12, notchY)
+    c.lineTo(w - 12, notchY)
     c.stroke()
     c.restore()
 
     const img = card.cover ? images.get(card.cover) : null
-    paintCover(c, img, 10, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0' })
-    const textX = 65, textW = w - textX - 10
+    paintCover(c, img, 12, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0' })
+    const textX = 66, textW = w - textX - 10
     c.textAlign = 'left'
     c.textBaseline = 'top'
     c.fillStyle = ACCENT
-    c.font = `500 7px ${MONO}`
-    const label = ellipsis(c, card.label, textW, 7 * 0.12)
-    fillSpaced(c, label, textX, 15, 7 * 0.12)
+    c.font = `500 9px ${MONO}`
+    const tracking = 9 * 0.08
+    const label = (card.label || '').length <= 16 ? (card.label || '') : ellipsis(c, card.label, textW, tracking)
+    fillSpaced(c, label, textX, 16, tracking)
     c.fillStyle = INK
-    c.font = `600 12.5px ${SERIF}`
-    const lines = wrapClamp(c, card.title, textW, 2, 12.5 * 0.02)
-    lines.forEach((line, i) => fillSpaced(c, line, textX, 28 + i * 15, 12.5 * 0.02))
+    c.font = `600 13px ${SERIF}`
+    const lines = wrapSmart(c, card.title, textW, 2, 13 * 0.02)
+    lines.forEach((line, i) => fillSpaced(c, line, textX, 32 + i * 16, 13 * 0.02))
     c.fillStyle = MINI_MUTED
-    c.font = `400 9px ${SERIF}`
-    const subY = 28 + lines.length * 15 + 1
-    if (subY < 70) fillSpaced(c, ellipsis(c, card.subtitle, textW, 0), textX, subY, 0)
+    c.font = `400 10px ${SERIF}`
+    const subY = 32 + lines.length * 16 + 2
+    if (subY < notchY - 6) fillSpaced(c, ellipsis(c, card.subtitle, textW, 0), textX, subY, 0)
 
     c.textBaseline = 'alphabetic'
-    c.font = `300 19px ${MONO}`
+    c.font = `300 20px ${MONO}`
     c.fillStyle = INK
-    const base = h - 12
-    fillSpaced(c, card.value, 12, base, 19 * 0.02)
-    c.font = `400 9px ${MONO}`
+    const base = h - 14
+    fillSpaced(c, card.value, 12, base, 0)
+    c.font = `400 10px ${MONO}`
     c.fillStyle = MINI_MUTED
     c.textAlign = 'right'
-    fillSpaced(c, card.unit, w - 12, base, 9 * 0.1)
+    fillSpaced(c, card.unit, w - 12, base, 10 * 0.06)
   })
 }
 function drawClock(ctx, poster) {
-  const left = 28, width = 484, top = 716
+  const left = 32, width = 476, top = 708
   ctx.textBaseline = 'alphabetic'
   ctx.textAlign = 'left'
-  const capSpacing = 13 * 0.06
-  ctx.font = `400 9px ${MONO}`
-  const peakW = widthOf(ctx, poster.peakLabel, 9 * 0.14)
-  ctx.font = `400 13px ${SERIF}`
+  const capSpacing = 14 * 0.04
+  ctx.font = `400 10px ${MONO}`
+  const peakW = widthOf(ctx, poster.peakLabel, 10 * 0.1)
+  ctx.font = `400 14px ${SERIF}`
   ctx.fillStyle = CREAM
   const caption = ellipsis(ctx, poster.caption, width - peakW - 16, capSpacing)
-  fillSpaced(ctx, caption, left, top + 13, capSpacing)
-  ctx.font = `400 9px ${MONO}`
+  fillSpaced(ctx, caption, left, top + 14, capSpacing)
+  ctx.font = `400 10px ${MONO}`
   ctx.fillStyle = ACCENT_SOFT
   ctx.textAlign = 'right'
-  fillSpaced(ctx, poster.peakLabel, left + width, top + 12, 9 * 0.14)
+  fillSpaced(ctx, poster.peakLabel, left + width, top + 13, 10 * 0.1)
 
-  const chartTop = top + 13 + 12, chartH = 40, gap = 3
+  const chartTop = top + 26, chartH = 56, gap = 3
   const barW = (width - 23 * gap) / 24
   const max = Math.max(1, ...poster.hours)
   for (let h = 0; h < 24; h++) {
     const count = poster.hours[h]
-    const bh = 4 + (count / max) * 32
+    const bh = 6 + (count / max) * (chartH - 6)
     const x = left + h * (barW + gap)
     const y = chartTop + chartH - bh
-    ctx.fillStyle = h === poster.peakHour ? ACCENT : 'rgba(242,237,225,.28)'
+    ctx.fillStyle = h === poster.peakHour ? ACCENT : 'rgba(242,237,225,.32)'
     ctx.beginPath()
     if (ctx.roundRect) ctx.roundRect(x, y, barW, bh, 1)
     else ctx.rect(x, y, barW, bh)
     ctx.fill()
   }
-  ctx.font = `400 8px ${MONO}`
-  ctx.fillStyle = 'rgba(243,239,230,.45)'
+  ctx.font = `400 10px ${MONO}`
+  ctx.fillStyle = 'rgba(243,239,230,.55)'
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
   const ticks = ['00', '06', '12', '18', '24']
   ticks.forEach((label, i) => {
     const x = i === 0 ? left : i === ticks.length - 1 ? left + width : left + (width * i) / (ticks.length - 1)
     ctx.textAlign = i === 0 ? 'left' : i === ticks.length - 1 ? 'right' : 'center'
-    fillSpaced(ctx, label, x, chartTop + chartH + 6, 0)
+    fillSpaced(ctx, label, x, chartTop + chartH + 8, 0)
   })
 }
 function drawFooter(ctx, poster) {
-  const left = 28, right = 512, bottom = 960 - 38
+  const left = 32, right = 508
+  const metaY = 920
+  const base = 876
+  const borderY = 836
   const groups = [
     [num(poster.songs), '首歌'],
     [num(poster.artists), '位歌手'],
     [num(poster.days), '个日子'],
   ]
   ctx.textBaseline = 'alphabetic'
-  ctx.font = `300 28px ${MONO}`
-  const numW = groups.map(([value]) => widthOf(ctx, value, 28 * 0.04))
-  ctx.font = `400 13px ${SERIF}`
-  const labelW = groups.map(([, label]) => widthOf(ctx, label, 13 * 0.08))
-  const groupW = groups.map((_, i) => numW[i] + 6 + labelW[i])
-  const total = groupW.reduce((a, b) => a + b, 0)
-  const gap = groups.length > 1 ? (right - left - total) / (groups.length - 1) : 0
-  const base = bottom - 14 - 18 - 6
-  let x = left
+  const colW = (right - left) / 3
   groups.forEach(([value, label], i) => {
-    ctx.font = `300 28px ${MONO}`
+    ctx.font = `300 30px ${MONO}`
+    const valueW = widthOf(ctx, value, 0)
+    ctx.font = `400 14px ${SERIF}`
+    const labelW = widthOf(ctx, label, 14 * 0.06)
+    const groupW = valueW + 8 + labelW
+    const colLeft = left + i * colW
+    let x = colLeft
+    if (i === 1) x = colLeft + (colW - groupW) / 2
+    if (i === 2) x = colLeft + colW - groupW
+    ctx.font = `300 30px ${MONO}`
     ctx.fillStyle = CREAM
     ctx.textAlign = 'left'
-    fillSpaced(ctx, value, x, base, 28 * 0.04)
-    ctx.font = `400 13px ${SERIF}`
-    fillSpaced(ctx, label, x + numW[i] + 6, base, 13 * 0.08)
-    x += groupW[i] + gap
+    fillSpaced(ctx, value, x, base, 0)
+    ctx.font = `400 14px ${SERIF}`
+    fillSpaced(ctx, label, x + valueW + 8, base, 14 * 0.06)
   })
-  const borderY = base - 26
   ctx.strokeStyle = 'rgba(242,237,225,.18)'
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(left, borderY)
   ctx.lineTo(right, borderY)
   ctx.stroke()
-  ctx.font = `400 9.5px ${MONO}`
-  ctx.fillStyle = 'rgba(243,239,230,.6)'
-  ctx.textBaseline = 'alphabetic'
+  ctx.font = `400 11px ${MONO}`
+  ctx.fillStyle = 'rgba(243,239,230,.62)'
   ctx.textAlign = 'left'
-  fillSpaced(ctx, poster.rangeLabel, left, bottom - 2, 9.5 * 0.08)
+  fillSpaced(ctx, poster.rangeLabel, left, metaY, 11 * 0.06)
   ctx.textAlign = 'right'
-  fillSpaced(ctx, poster.site, right, bottom - 2, 9.5 * 0.06)
+  fillSpaced(ctx, poster.site, right, metaY, 11 * 0.04)
 }
 
 function drawPoster(ctx, poster, images) {
+  if ('fontVariantNumeric' in ctx) ctx.fontVariantNumeric = 'tabular-nums'
   ctx.fillStyle = NIGHT
   ctx.fillRect(0, 0, 540, 960)
   drawWall(ctx, poster, images)
