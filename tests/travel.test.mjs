@@ -21,8 +21,8 @@ test('easeTravel accelerates then decelerates', () => {
 })
 
 test('clock parts and lerp walk backward through a date', () => {
-  const from = Date.parse('2026-11-08T04:00:00+09:00')
-  const to = Date.parse('2025-04-13T08:02:00+09:00')
+  const from = Date.parse('2026-11-08T12:00:00Z')
+  const to = Date.parse('2025-04-13T12:00:00Z')
   const mid = lerp(from, to, 0.5)
   assert.ok(mid < from && mid > to)
   const parts = clockParts(to)
