@@ -1326,37 +1326,65 @@ function applyTravelGlow(event) {
   $('travelStage')?.style.setProperty('--travel-glow', rgb)
 }
 const travelArts = new Map()
+const travelArtsPending = new Map()
+function coverThumb(url, px) {
+  const clean = coverUrl(url) || url
+  return coverSize(clean, px)
+}
 function clonedArt(img, className = '', decoding = 'async') {
-  // Clone an already-decoded image so tiles paint immediately (new Image()+src can flash empty).
-  const next = img.cloneNode(true)
+  // Reuse the already-fetched URL so the HTTP cache paints immediately.
+  // cloneNode of a decoded <img> can stay blank in WebKit.
+  const next = new Image()
   next.alt = ''
   next.decoding = decoding
   next.referrerPolicy = 'no-referrer'
   if (className) next.className = className
+  const src = img?.currentSrc || img?.src
+  if (src) next.src = src
   return next
 }
 function decodeTravelCover(url, px = travelCoverPx()) {
   if (!url) return Promise.resolve(null)
   const cached = travelArts.get(url)
   if (cached?.naturalWidth > 0) return Promise.resolve(cached)
+  const inflight = travelArtsPending.get(url)
+  if (inflight) return inflight
   const img = new Image()
   img.decoding = 'async'
   img.referrerPolicy = 'no-referrer'
-  img.crossOrigin = 'anonymous'
-  img.src = coverSize(url, px)
-  return img.decode().then(() => {
+  // Do not set crossOrigin. NetEase sends ACAO:* together with
+  // Allow-Credentials: true, which some WebKit builds reject; a failed
+  // CORS attempt can also poison the cache so a no-CORS retry stays blank.
+  img.src = coverThumb(url, px)
+  const work = img.decode().then(() => {
     if (img.naturalWidth > 0) { travelArts.set(url, img); return img }
     return null
-  }).catch(() => {
-    const plain = new Image()
-    plain.decoding = 'async'
-    plain.referrerPolicy = 'no-referrer'
-    plain.src = coverSize(url, px)
-    return plain.decode().then(() => {
-      if (plain.naturalWidth > 0) { travelArts.set(url, plain); return plain }
-      return null
-    }).catch(() => null)
+  }).catch(() => new Promise(resolve => {
+    const finish = () => {
+      if (img.naturalWidth > 0) { travelArts.set(url, img); resolve(img) }
+      else resolve(null)
+    }
+    if (img.complete) { finish(); return }
+    img.addEventListener('load', finish, { once: true })
+    img.addEventListener('error', () => resolve(null), { once: true })
+  })).finally(() => {
+    if (travelArtsPending.get(url) === work) travelArtsPending.delete(url)
   })
+  travelArtsPending.set(url, work)
+  return work
+}
+function seedTravelCover(event, px = travelCoverPx()) {
+  if (!event?.cover) return null
+  const cached = travelArts.get(event.cover)
+  if (cached?.naturalWidth > 0) return cached
+  const img = new Image()
+  img.decoding = 'async'
+  img.referrerPolicy = 'no-referrer'
+  img.src = coverThumb(event.cover, px)
+  const remember = () => { if (img.naturalWidth > 0) travelArts.set(event.cover, img) }
+  if (img.complete) remember()
+  else img.addEventListener('load', remember, { once: true })
+  return img
 }
 let travelCoverPick = null
 function refreshTravelCoverPick(target) {
@@ -1391,11 +1419,12 @@ async function collectTunnelArts(target) {
   const px = travelCoverPx()
   if (target?.cover) decodeTravelCover(target.cover, px)
   const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover, px) : Promise.resolve(null))
-  const want = Math.max(1, Math.min(12, picked.filter(e => e?.cover).length || 1))
-  await Promise.race([Promise.all(pending).catch(() => {}), waitMs(650)])
+  const pictured = picked.filter(e => e?.cover)
+  const want = Math.max(1, Math.min(12, pictured.length || 1))
+  await Promise.race([Promise.all(pending).catch(() => {}), waitMs(800)])
   let ready = readyTravelArts(picked)
   if (ready.length < want) {
-    await Promise.race([Promise.all(pending).catch(() => {}), waitMs(400)])
+    await Promise.race([Promise.all(pending).catch(() => {}), waitMs(700)])
     ready = readyTravelArts(picked)
   }
   if (!ready.length && target?.cover) {
@@ -1403,7 +1432,14 @@ async function collectTunnelArts(target) {
     if (one) ready = [{ event: target, img: one }]
   }
   const others = ready.filter(a => a.event?.song_id !== target?.song_id)
-  return fillTravelWall(others.length ? others : ready, travelTileCount())
+  const wall = fillTravelWall(others.length ? others : ready, travelTileCount())
+  if (wall.length) return wall
+  // Never start with empty dark glyphs when cover URLs exist: plant images
+  // that can fill in from cache as they load, then repeat them to fill the wall.
+  const seeds = (pictured.length ? pictured : (target?.cover ? [target] : []))
+    .map(e => ({ event: e, img: seedTravelCover(e, px) }))
+    .filter(a => a.img)
+  return fillTravelWall(seeds, travelTileCount())
 }
 function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
@@ -1435,9 +1471,16 @@ function buildTravelTunnel(target, arts) {
   const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), want)
   const list = walls.length ? walls : fillTravelWall(ready, want)
   if (!list.length) {
-    for (const e of pickTravelCovers(state.all, target, 8)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
+    const picked = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
+    const pictured = picked.filter(e => e.cover)
+    if (pictured.length) {
+      const seeded = fillTravelWall(pictured.map(e => ({ event: e, img: seedTravelCover(e) })).filter(a => a.img), want)
+      for (const art of seeded) tunnel.append(makeTravelCard(art))
+    } else {
+      for (const e of picked.slice(0, 8)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
+    }
   } else {
-    for (const art of list) tunnel.append(makeTravelCard(art))
+    for (const art of list) if (art?.img) tunnel.append(makeTravelCard(art))
   }
   paintTravelHero(target)
   return tunnel.children.length

@@ -1303,11 +1303,11 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 @keyframes travel-in { from { opacity: 0 } }
 
 /* 隧道：四面密铺封面，向消失点流去 */
-.travel-stage { --travel-glow: 196 142 78; --travel-perspective: 1200px; position: absolute; inset: 0; perspective: var(--travel-perspective); perspective-origin: 50% 48%; overflow: hidden; contain: layout style }
-.travel-back { position: absolute; inset: -12%; z-index: 0; overflow: hidden; pointer-events: none; background: #0c0b0a }
-.travel-back img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.28);
-  filter: none; opacity: .58 }
-.travel-back::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: rgb(12 11 10 / .42) }
+.travel-stage { --travel-glow: 196 142 78; --travel-perspective: 900px; position: absolute; inset: 0; perspective: var(--travel-perspective); perspective-origin: 50% 46%; overflow: hidden; contain: layout style }
+.travel-back { position: absolute; inset: -18%; z-index: 0; overflow: hidden; pointer-events: none; background: #0c0b0a }
+.travel-back img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.22);
+  filter: none; opacity: .78 }
+.travel-back::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: rgb(12 11 10 / .28) }
 .travel-back img[hidden] { display: none }
 .travel-stage[hidden] { display: none }
 .travel-bloom { position: absolute; inset: 0; pointer-events: none; z-index: 2; opacity: .55;
@@ -1498,14 +1498,14 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
   .arrive-near[aria-current] .arrive-near-day::after { content: none }
   .arrive-actions { margin-top: auto; padding-top: 26px; gap: 6px 22px }
   .arrive-copy { min-height: 0 }
-  .travel-card { width: 124px; height: 124px; margin: -62px 0 0 -62px;
+  .travel-card { width: 128px; height: 128px; margin: -64px 0 0 -64px;
     box-shadow: none; outline: 1px solid rgb(255 255 255 / .07) }
   .travel-bloom, .travel-chroma, .travel-streaks { mix-blend-mode: normal }
   .travel-chroma, .travel-streaks { display: none }
   .travel-grain { mix-blend-mode: normal; opacity: .1 }
   .travel-stage.is-portrait { perspective-origin: 50% 48% }
-  .travel-stage.is-portrait .travel-card { width: 124px; height: 124px; margin: -62px 0 0 -62px }
-  .travel-stage.is-portrait .travel-hero-card { width: 188px; height: 188px; margin: -94px 0 0 -94px;
+  .travel-stage.is-portrait .travel-card { width: 136px; height: 136px; margin: -68px 0 0 -68px }
+  .travel-stage.is-portrait .travel-hero-card { width: 200px; height: 200px; margin: -100px 0 0 -100px;
     box-shadow: 0 18px 36px rgb(0 0 0 / .4); outline: none }
   .travel-year { font-size: clamp(72px, 20vw, 108px); color: #f7f2ea;
     text-shadow: 0 2px 28px rgb(12 11 10 / .6) }
