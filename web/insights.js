@@ -7,8 +7,18 @@ const ymd = date => date.split('-').map(Number)
 const dayLabel = (date, year = false) => { const [y, m, d] = ymd(date); return `${year ? `${y} 年 ` : ''}${m} 月 ${d} 日` }
 const shanghaiDate = ms => new Date(ms + 8 * 3600000).toISOString().slice(0, 10)
 const hour = e => Number(e.time.slice(0, 2))
-const plays = e => (Number.isFinite(e.play_count) && e.play_count > 0 ? e.play_count : 0)
-const firstArtist = e => (e.artists || '').split(' / ')[0] || ''
+// Shared with the share poster so "listened most" and "met most" stay one definition.
+export const playCount = e => (Number.isFinite(e.play_count) && e.play_count > 0 ? e.play_count : 0)
+export const leadArtist = e => (e.artists || '').split(' / ')[0] || ''
+const plays = playCount
+export function artistRanks(events) {
+  const artists = new Map()
+  for (const e of events) {
+    const a = leadArtist(e)
+    if (a) (artists.get(a) || artists.set(a, []).get(a)).push(e)
+  }
+  return [...artists].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+}
 const nextDay = date => { const [y, m, d] = ymd(date); return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10) }
 const covers = list => [...new Map(list.filter(e => e.cover).map(e => [e.cover, e])).values()].slice(0, 4)
 
@@ -41,9 +51,7 @@ export function insights(events) {
   const peak = best(events.filter(e => e.peak_count >= 3), e => e.peak_count)
   if (peak) song('peak', '单曲循环最狠的一天', peak, `${peak.peak_ms ? dayLabel(shanghaiDate(peak.peak_ms), true) : '有一天'}，这首听了 ${n(peak.peak_count)} 遍`)
 
-  const artists = new Map()
-  for (const e of events) { const a = firstArtist(e); if (a) (artists.get(a) || artists.set(a, []).get(a)).push(e) }
-  const [artist, songs] = [...artists].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))[0] || []
+  const [artist, songs] = artistRanks(events)[0] || []
   if (songs?.length >= 3) out.push({ id: 'artist', kicker: '遇见最多的歌手', kind: 'artist', title: artist, meta: `${n(songs.length)} 首初听`,
     line: `第一首是《${songs[0].name}》，${dayLabel(songs[0].date, true)}`, covers: covers([...songs].reverse()), query: artist })
 

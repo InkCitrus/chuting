@@ -7,7 +7,7 @@ const VERSION = '__BUILD__'
 const SHELL = `chuting-shell-${VERSION}`
 const COVERS = 'chuting-covers-v1'
 const MAX_COVERS = 600
-const FILES = ['/', '/styles.css', '/theme.js', '/app.js', '/backend.js', '/browser-store.js', '/browser-sync.js', '/archive-core.js', '/insights.js', '/rotator.js', '/copy.js', '/player.js',
+const FILES = ['/', '/styles.css', '/theme.js', '/app.js', '/backend.js', '/browser-store.js', '/browser-sync.js', '/archive-core.js', '/insights.js', '/share.js', '/rotator.js', '/copy.js', '/player.js',
   '/favicon.svg', '/manifest.webmanifest', '/icons/icon-192.png']
 const COVER_HOST = /^p\d{1,2}\.music\.126\.net$/
 

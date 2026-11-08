@@ -1,6 +1,7 @@
 'use strict'
 import { createBackend, remote } from './backend.js'
 import { insights } from './insights.js'
+import { canSharePoster, renderPoster, sharePayload } from './share.js'
 import { coverSize } from './archive-core.js'
 
 // Rotator / copy / player are nice-to-have. If a stale cache drops one of them, the archive
@@ -345,6 +346,8 @@ function renderStatus() {
   const total = running() && run.total ? run.total : stats.discovered || 1
   $('coverageProgress').max = total
   $('coverageProgress').value = running() && run.total ? run.queried || 0 : stats.queried || 0
+  const shareButton = $('shareButton')
+  if (shareButton) shareButton.hidden = !state.all.length
   renderSettings()
   player?.setOffline(state.offline ? 'offline' : has && !online ? 'login' : null)
 }
@@ -874,7 +877,7 @@ function closeDialog(dialog, { fromPop = false } = {}) {
   dialog.classList.add('is-closing')
   setTimeout(() => { dialog.classList.remove('is-closing'); dialog.close(); afterClose() }, 200)
 }
-for (const id of ['settingsDialog', 'songDialog', 'loginDialog']) {
+for (const id of ['settingsDialog', 'songDialog', 'loginDialog', 'shareDialog']) {
   const d = $(id)
   d.addEventListener('cancel', e => { e.preventDefault(); closeDialog(d) })
   d.addEventListener('close', () => { tick(); player?.render(); syncSettingsExpanded() })
@@ -1205,6 +1208,89 @@ $('themeSeg')?.addEventListener('click', e => {
   if (btn) setTheme(btn.dataset.themeOpt)
 })
 syncThemeSeg()
+let shareJob = 0
+const shareState = { text: '', blob: null, name: '' }
+async function copyShareText() {
+  const text = shareState.text
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toast('已复制')
+    return
+  } catch { /* fall through to the selection copy */ }
+  try {
+    const area = document.createElement('textarea')
+    area.value = text
+    area.setAttribute('readonly', '')
+    area.style.cssText = 'position:fixed;left:-9999px'
+    document.body.append(area)
+    area.select()
+    const ok = document.execCommand('copy')
+    area.remove()
+    if (!ok) throw new Error('copy')
+    toast('已复制')
+  } catch { toast('复制失败了', 'error') }
+}
+function saveShare() {
+  if (!shareState.blob) return
+  const url = URL.createObjectURL(shareState.blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = shareState.name
+  document.body.append(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+async function nativeShare() {
+  if (!shareState.blob) return
+  const file = new File([shareState.blob], shareState.name, { type: 'image/png' })
+  try { await navigator.share({ files: [file], title: '初听', text: shareState.text }) }
+  catch (err) { if (err?.name !== 'AbortError') toast('没能分享出去', 'error') }
+}
+async function openShare() {
+  const payload = sharePayload({ events: state.all })
+  if (!payload) return
+  const job = ++shareJob
+  shareState.text = payload.text
+  shareState.blob = null
+  shareState.name = payload.poster.rangeStart === payload.poster.rangeEnd
+    ? `chuting-${payload.poster.rangeStart}.png`
+    : `chuting-${payload.poster.rangeStart}-${payload.poster.rangeEnd}.png`
+  const dialog = $('shareDialog')
+  const status = $('shareStatus')
+  status.hidden = false
+  status.textContent = '正在排版海报…'
+  $('shareStage').replaceChildren()
+  $('shareStage').setAttribute('aria-busy', 'true')
+  $('shareSave').disabled = true
+  $('shareNative').hidden = true
+  openModal(dialog)
+  try {
+    const { canvas, blob } = await renderPoster(payload.poster)
+    if (job !== shareJob || !dialog.open) return
+    canvas.className = 'share-canvas'
+    canvas.setAttribute('role', 'img')
+    canvas.setAttribute('aria-label', `初听海报，${payload.poster.songs} 首歌`)
+    $('shareStage').replaceChildren(canvas)
+    $('shareStage').setAttribute('aria-busy', 'false')
+    status.hidden = true
+    shareState.blob = blob
+    $('shareSave').disabled = false
+    $('shareNative').hidden = !canSharePoster(blob)
+  } catch {
+    if (job !== shareJob) return
+    $('shareStage').setAttribute('aria-busy', 'false')
+    status.hidden = false
+    status.textContent = '海报没画出来，文字还可以复制。'
+  }
+}
+$('shareButton')?.addEventListener('click', () => openShare())
+$('closeShare')?.addEventListener('click', () => closeDialog($('shareDialog')))
+$('shareDialog')?.addEventListener('close', () => { shareJob++ })
+$('shareSave')?.addEventListener('click', saveShare)
+$('shareCopy')?.addEventListener('click', () => copyShareText())
+$('shareNative')?.addEventListener('click', () => nativeShare())
 $('settingsButton').addEventListener('click', () => { renderSettings(); openModal($('settingsDialog')) })
 $('closeSettings').addEventListener('click', () => closeDialog($('settingsDialog')))
 $('closeSong').addEventListener('click', () => closeDialog($('songDialog')))
