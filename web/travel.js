@@ -2,7 +2,7 @@
 export const TRAVEL_MS = 3500
 export const TRAVEL_BACK_MS = 920
 export const TRAVEL_REDUCED_MS = 340
-export const TRAVEL_MAX_COVERS = 24
+export const TRAVEL_MAX_COVERS = 48
 export const TRAVEL_COVER_PX = 200
 export const TRAVEL_TILES = 120
 export const TRAVEL_SIDES = 4
@@ -62,8 +62,9 @@ export function travelFx(t) {
   }
 }
 
-// Prefer events that actually have artwork. Never pad the tunnel with letter tiles
-// when at least one real cover exists; the letter fallback is only for empty archives.
+// Prefer artwork along the travelled span (now → target), ordered toward the
+// destination and deduped by cover URL. Never pad with letter tiles when at
+// least one real cover exists; the letter fallback is only for empty archives.
 export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
   const list = Array.isArray(events) ? events : []
   const cap = Math.max(1, Math.min(TRAVEL_MAX_COVERS, limit || TRAVEL_MAX_COVERS))
@@ -78,10 +79,37 @@ export function pickTravelCovers(events, target, limit = TRAVEL_MAX_COVERS) {
   const rest = list.filter(e => e && e.song_id !== target?.song_id)
   const pictured = rest.filter(e => e.cover)
   const pool = pictured.length ? pictured : rest
+  const to = target?.first_listen_ms
+  const from = Date.now()
+  const lo = Number.isFinite(to) ? Math.min(from, to) : -Infinity
+  const hi = Number.isFinite(to) ? Math.max(from, to) : Infinity
+  const along = [], outside = []
+  for (const e of pool) {
+    const t = e.first_listen_ms
+    if (Number.isFinite(to) && Number.isFinite(t) && t >= lo && t <= hi) along.push(e)
+    else outside.push(e)
+  }
+  const byDate = (a, b) => (a.first_listen_ms || 0) - (b.first_listen_ms || 0)
+  along.sort(byDate)
+  outside.sort(byDate)
+  if (Number.isFinite(to) && from > to) {
+    along.reverse()
+    outside.reverse()
+  }
   const reserve = target && (target.cover || !pictured.length) ? 1 : 0
-  const step = Math.max(1, Math.floor(pool.length / Math.max(1, cap - reserve)))
-  for (let i = 0; i < pool.length && out.length < cap - reserve; i += step) add(pool[i])
-  for (const e of pool) { if (out.length >= cap - reserve) break; add(e) }
+  const budget = cap - reserve
+  const sample = (arr, want) => {
+    if (!arr.length || want <= 0 || out.length >= budget) return
+    if (arr.length <= want) {
+      for (const e of arr) { if (out.length >= budget) break; add(e) }
+      return
+    }
+    const step = arr.length / want
+    for (let i = 0; i < want && out.length < budget; i++) add(arr[Math.min(arr.length - 1, Math.floor(i * step))])
+    for (const e of arr) { if (out.length >= budget) break; add(e) }
+  }
+  sample(along, budget)
+  sample(outside, budget - out.length)
   if (target && (target.cover || !pictured.length)) add(target)
   return out
 }

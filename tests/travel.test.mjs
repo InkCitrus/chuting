@@ -111,3 +111,38 @@ test('hero cover stays hidden until late, then grows out of the vanishing point'
   assert.ok(late.z > early.z)
   assert.ok(late.scale > early.scale)
 })
+
+test('pickTravelCovers prefers covers along the travelled span and caps at 48', () => {
+  assert.equal(TRAVEL_MAX_COVERS, 48)
+  const targetMs = Date.parse('2024-03-01T00:00:00+09:00')
+  const target = { song_id: 't', cover: 'ct', first_listen_ms: targetMs, name: 'T' }
+  const along = Array.from({ length: 20 }, (_, i) => ({
+    song_id: `a${i}`,
+    cover: `along-${i}`,
+    first_listen_ms: targetMs + (i + 1) * 30 * 86400000
+  }))
+  const far = Array.from({ length: 20 }, (_, i) => ({
+    song_id: `f${i}`,
+    cover: `far-${i}`,
+    first_listen_ms: Date.parse('2016-01-01T00:00:00+09:00') + i * 86400000
+  }))
+  const covers = pickTravelCovers([...far, ...along, target], target, 10)
+  assert.ok(covers.length <= 10)
+  assert.equal(covers.at(-1).song_id, 't')
+  const rest = covers.slice(0, -1)
+  const alongCount = rest.filter(e => String(e.cover).startsWith('along-')).length
+  assert.ok(alongCount >= 8, `expected most picks from the travelled span, got ${alongCount}`)
+})
+
+test('pickTravelCovers dedupes by cover URL and keeps unique art', () => {
+  const target = { song_id: 't', cover: 'unique-t', first_listen_ms: Date.parse('2024-01-01T00:00:00+09:00') }
+  const events = Array.from({ length: 12 }, (_, i) => ({
+    song_id: String(i),
+    cover: i < 8 ? 'shared' : `other-${i}`,
+    first_listen_ms: Date.parse('2025-01-01T00:00:00+09:00') + i * 86400000
+  }))
+  const covers = pickTravelCovers([...events, target], target, 8)
+  assert.equal(new Set(covers.map(e => e.cover || `id:${e.song_id}`)).size, covers.length)
+  assert.ok(covers.some(e => e.cover === 'shared'))
+  assert.equal(covers.filter(e => e.cover === 'shared').length, 1)
+})

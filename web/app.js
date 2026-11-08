@@ -45,7 +45,7 @@ const easeOut = travelMod?.easeOut || (t => 1 - (1 - Math.min(1, Math.max(0, t))
 const easeTravel = travelMod?.easeTravel || (t => { const x = Math.min(1, Math.max(0, t)); return x * x * x * (x * (x * 6 - 15) + 10) })
 const lerp = travelMod?.lerp || ((a, b, t) => a + (b - a) * t)
 const clockParts = travelMod?.clockParts || (ms => { const d = new Date(ms); return Number.isNaN(d.getTime()) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() } })
-const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 24) => (target ? [target] : []).concat(events || []).slice(0, limit))
+const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 48) => (target ? [target] : []).concat(events || []).slice(0, limit))
 const fillTravelWall = travelMod?.fillTravelWall || (items => items || [])
 const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 400, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0, scale: 1, blur: 0, brightness: 1 }))
 const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
@@ -53,6 +53,7 @@ const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 
 const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
+const TRAVEL_MAX_COVERS = travelMod?.TRAVEL_MAX_COVERS || 48
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -915,11 +916,19 @@ function renderHeroCapsule() {
     const n = result.songs.length
     const first = result.songs[0].event
     line.textContent = n === 1 ? `历史上的今天，你遇见了《${first.name}》` : `历史上的今天，往年遇见过 ${n} 首`
-    if (todayBtn) todayBtn.hidden = false
+    if (todayBtn) {
+      todayBtn.hidden = false
+      todayBtn.textContent = '历史上的今天'
+      todayBtn.title = '回到过去某年的同一天'
+    }
     capsule.todayPick = first
   } else if (result.nearest?.songs?.length) {
     line.textContent = `往年的今天还是空白。最靠近的是 ${result.nearest.m} 月 ${result.nearest.d} 日`
-    if (todayBtn) todayBtn.hidden = false
+    if (todayBtn) {
+      todayBtn.hidden = false
+      todayBtn.textContent = '去最近的那天'
+      todayBtn.title = '去最靠近今天的那个日子'
+    }
     capsule.todayPick = result.nearest.songs[0].event
   } else {
     line.textContent = '往年的今天，还没有记下初听'
@@ -1007,9 +1016,9 @@ function renderCapsuleToday(body) {
 }
 function renderCapsuleRandom(body) {
   if (!state.all.length) { body.append(node('p', 'capsule-lede', '还没有可以回顾的初听。')); return }
-  const lede = node('p', 'capsule-lede', '随便抽一个第一次。也许是很久以前，也许就在上个月。')
-  const hint = node('p', 'capsule-hint', '封面会带着你穿越回去，歌也会一起响起来。')
-  const go = node('button', 'button primary', '开始穿越')
+  const lede = node('p', 'capsule-lede', '不挑日子，从档案里随便抽一个第一次。也许是很久以前，也许就在上个月。')
+  const hint = node('p', 'capsule-hint', '和「历史上的今天」不同：这里不会固定月日，每一次都是另一天。')
+  const go = node('button', 'button primary', '随机穿越')
   go.type = 'button'
   go.addEventListener('click', () => {
     const event = capsuleRandom(state.all, Math.random, capsule.lastRandom)
@@ -1185,13 +1194,9 @@ function decodeTravelCover(url) {
   })
 }
 function preloadTravelLibrary() {
-  const seen = new Set()
-  for (const e of state.all) {
-    if (!e?.cover || seen.has(e.cover)) continue
-    seen.add(e.cover)
-    decodeTravelCover(e.cover)
-    if (seen.size >= 48) break
-  }
+  const hint = capsule.todayPick || state.all[0]
+  const picked = pickTravelCovers(state.all, hint, TRAVEL_MAX_COVERS)
+  for (const e of picked) if (e?.cover) decodeTravelCover(e.cover)
 }
 function readyTravelArts(picked) {
   const out = []
@@ -1204,17 +1209,32 @@ function readyTravelArts(picked) {
   }
   return out
 }
-async function collectTunnelArts(target) {
-  const picked = pickTravelCovers(state.all, target, 24)
-  const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover) : Promise.resolve(null))
-  const settle = Promise.all(pending).catch(() => {})
-  await Promise.race([settle, new Promise(r => setTimeout(r, 480))])
-  let ready = readyTravelArts(picked)
-  if (!ready.length) {
-    await Promise.race([settle, new Promise(r => setTimeout(r, 280))])
-    ready = readyTravelArts(picked)
+function gatherTravelArts(target) {
+  const picked = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
+  const ready = readyTravelArts(picked)
+  const seen = new Set(ready.map(a => a.event.cover))
+  for (const extra of readyTravelArts(state.all)) {
+    if (!extra.event?.cover || seen.has(extra.event.cover)) continue
+    if (extra.event.song_id === target?.song_id) continue
+    seen.add(extra.event.cover)
+    ready.push(extra)
   }
   return fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_TILES)
+}
+function uniqueTravelCovers(arts) {
+  return new Set((arts || []).map(a => a.event?.cover || a.cover).filter(Boolean)).size
+}
+async function collectTunnelArts(target) {
+  const picked = pickTravelCovers(state.all, target, TRAVEL_MAX_COVERS)
+  const pending = picked.map(e => e.cover ? decodeTravelCover(e.cover) : Promise.resolve(null))
+  const settle = Promise.all(pending).catch(() => {})
+  await Promise.race([settle, new Promise(r => setTimeout(r, 1100))])
+  let arts = gatherTravelArts(target)
+  if (uniqueTravelCovers(arts) < 8) {
+    await Promise.race([settle, new Promise(r => setTimeout(r, 700))])
+    arts = gatherTravelArts(target)
+  }
+  return arts
 }
 function makeTravelCard(art, extraClass = '') {
   const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
@@ -1434,11 +1454,12 @@ function startTravel(event, { source = 'random' } = {}) {
   cancelAnimationFrame(travel.raf)
   if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
-  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)).filter(a => a.event?.song_id !== event?.song_id), TRAVEL_TILES)
-  if (cached.length) beginTravelMotion(event, cached)
+  const cached = gatherTravelArts(event)
+  const uniqueCached = uniqueTravelCovers(cached)
+  if (cached.length && uniqueCached >= 8) beginTravelMotion(event, cached)
   else collectTunnelArts(event).then(arts => {
     if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
-    beginTravelMotion(event, arts)
+    beginTravelMotion(event, arts.length ? arts : cached)
   })
 }
 function rerollTravel() {
