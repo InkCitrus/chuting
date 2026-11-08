@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { createDecipheriv } from 'node:crypto'
 import { eapi, weapi, endpoint, ApiError, callNetease } from '../cloudflare/netease.mjs'
 import { seal, unseal, sessionCookie } from '../cloudflare/session.mjs'
-import { handleApi, pickMatch } from '../cloudflare/worker.mjs'
+import { handleApi, pickMatch, hardAudio, playable, cloudHint } from '../cloudflare/worker.mjs'
 const require = createRequire(import.meta.url)
 const upstreamCrypto = require('@neteasecloudmusicapienhanced/api/util/crypto.js')
 const secret = 'test-only-secret-32-characters-long-123456789'
@@ -166,13 +166,13 @@ test('player: the session is forwarded, the URL comes back over https from the a
   })
   assert.deepEqual(methods, ['song_url', 'song_url', 'song_url_legacy'])
   assert.equal(body.url, 'https://m7.music.126.net/legacy.mp3')
-  // Lossless everywhere: stop after the legacy ask. A fourth request would loop.
+  // Lossless everywhere: recover may also ask detail and download URLs, then stop.
   let calls = 0
   body = await ask(async () => {
     calls++
     return { body: { code: 200, data: [{ id: 7, url: 'https://m701.music.126.net/sq.flac', br: 983061, type: 'flac', time: 368000, fee: 0, level: 'lossless' }] }, cookie: {} }
   })
-  assert.equal(calls, 3)
+  assert.equal(calls, 6)
   assert.equal(body.type, 'flac')
   // No URL, and the privilege says the track cannot be listened to: copyright, not a format error.
   body = await ask(async () => ({ body: { code: 200, data: [{ id: 7, url: null, fee: 0, code: 404, freeTrialPrivilege: { cannotListenReason: 1 } }] }, cookie: {} }))
@@ -188,6 +188,12 @@ test('player endpoint asks NetEase for one song at a bounded quality level', () 
   assert.equal(endpoint('song_url', { id: '7', encodeType: 'flac' })[1].encodeType, 'mp3')
   assert.equal(endpoint('song_url', { id: '7', encodeType: 'ogg' })[1].encodeType, 'mp3')
   assert.throws(() => endpoint('song_url', { id: '7;drop' }))
+  assert.deepEqual(endpoint('song_download_url', { id: '7' })[1], { id: 7, br: 128000 })
+  assert.equal(endpoint('song_download_url', { id: '7', br: 320000 })[1].br, 320000)
+  const [dlPath, dlData, dlMode] = endpoint('song_download_url_v1', { id: '7', encodeType: 'flac', level: 'lossless' })
+  assert.equal(dlPath, '/api/song/enhance/download/url/v1')
+  assert.deepEqual(dlData, { id: 7, level: 'standard', encodeType: 'mp3' })
+  assert.equal(dlMode, 'weapi')
 })
 test('CSP lets audio play only from the NetEase CDN', async () => {
   const csp = (await handleApi(new Request(origin + '/api/runtime'), {})).headers.get('Content-Security-Policy')
@@ -235,4 +241,81 @@ test('a lossless-only upload plays the matched catalogue MP3 instead', async () 
   // No title sent: no search, the original answer stands.
   const plain = await ask(async (method) => ({ body: { code: 200, data: [{ id: 42, url: 'https://m701.music.126.net/up.m4a', br: 900000, type: 'm4a', time: 1, fee: 0, level: 'lossless' }] }, cookie: {} }), { id: '42' })
   assert.equal(plain.type, 'm4a')
+})
+
+test('hardAudio treats a tagged-lossless MP3 as playable and flags ape, ALAC and Dolby', () => {
+  assert.equal(hardAudio({ url: 'https://m801.music.126.net/a.mp3', type: 'mp3', level: 'lossless', br: 320000 }), false)
+  assert.equal(hardAudio({ url: 'https://m801.music.126.net/a.ape', type: 'ape', br: 850000 }), true)
+  assert.equal(hardAudio({ url: 'https://m801.music.126.net/a.m4a', type: 'm4a', level: 'exhigh', br: 256000 }), false)
+  assert.equal(hardAudio({ url: 'https://m801.music.126.net/a.m4a', type: 'm4a', encodeType: 'alac', level: 'lossless', br: 980000 }), true)
+  assert.equal(hardAudio({ url: 'https://m801.music.126.net/a.m4a', type: 'm4a', level: 'jymaster', br: 900000 }), true)
+})
+
+test('playable reads a download-url object payload and encodeType', () => {
+  const body = playable({ data: { id: 7, url: 'http://m7.music.126.net/x.mp3', br: 128000, encodeType: 'mp3', type: '', time: 1000 } }, 7)
+  assert.equal(body.url, 'https://m7.music.126.net/x.mp3')
+  assert.equal(body.type, 'mp3')
+  assert.equal(body.encodeType, 'mp3')
+})
+
+test('cloudHint reads pc.sid, the uploaded filename, and cloud flags', () => {
+  const hint = cloudHint({ t: 2, pc: { sid: 555, fn: 'demo-upload.APE' }, privilege: { cs: true } })
+  assert.equal(hint.cloud, true)
+  assert.equal(hint.sid, '555')
+  assert.equal(hint.format, 'ape')
+  assert.equal(cloudHint({ privilege: {} }).cloud, false)
+})
+
+test('a cloud upload with a different pc.sid plays that catalogue MP3', async () => {
+  const secret = 'x'.repeat(32)
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'vip-session' } }, secret, 'session', 60)
+  const ask = (rpc, query) => handleApi(req('/api/netease', { uid: '1', method: 'song_url', query }, 'chuting_session=' + token), env, rpc).then(r => r.json())
+  const calls = []
+  const body = await ask(async (method, query) => {
+    calls.push([method, String(query.id || query.ids || query.s || '')])
+    if (method === 'song_detail') return { body: { code: 200, songs: [{ id: 42, pc: { sid: 555, fn: 'demo.flac' }, privilege: { cs: true } }] }, cookie: {} }
+    if (method === 'song_url' && String(query.id) === '555') return { body: { code: 200, data: [{ id: 555, url: 'http://m801.music.126.net/cat.mp3', br: 128000, type: 'mp3', time: 233000, fee: 0, level: 'standard' }] }, cookie: {} }
+    return { body: { code: 200, data: [{ id: 42, url: 'https://m701.music.126.net/up.flac', br: 980000, type: 'flac', time: 233000, fee: 0, level: 'lossless' }] }, cookie: {} }
+  }, { id: '42' })
+  assert.equal(body.url, 'https://m801.music.126.net/cat.mp3')
+  assert.equal(body.id, '42')
+  assert.equal(body.matched, '555')
+  assert.ok(calls.some(([m, s]) => m === 'song_detail' && s === '42'))
+  assert.ok(calls.some(([m, s]) => m === 'song_url' && s === '555'))
+  assert.equal(calls.some(([m]) => m === 'song_search'), false)
+})
+
+test('a same-id cloud overlay uses the transcoded download URL', async () => {
+  const secret = 'x'.repeat(32)
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'vip-session' } }, secret, 'session', 60)
+  const ask = (rpc, query) => handleApi(req('/api/netease', { uid: '1', method: 'song_url', query }, 'chuting_session=' + token), env, rpc).then(r => r.json())
+  const calls = []
+  const body = await ask(async (method, query) => {
+    calls.push(method)
+    if (method === 'song_detail') return { body: { code: 200, songs: [{ id: 42, pc: { sid: 42, fn: 'demo.ape' }, privilege: { cs: true }, t: 2 }] }, cookie: {} }
+    if (method === 'song_download_url') return { body: { code: 200, data: { id: 42, url: 'http://m7.music.126.net/trans.mp3', br: 128000, type: 'mp3', time: 233000, fee: 0, level: 'standard' } }, cookie: {} }
+    if (method === 'song_search') return { body: { code: 200, result: { songs: [{ id: 42, name: 'Fixture', ar: [{ name: 'Demo' }] }] } }, cookie: {} }
+    return { body: { code: 200, data: [{ id: 42, url: 'https://m701.music.126.net/up.ape', br: 850000, type: 'ape', time: 233000, fee: 0, level: 'lossless' }] }, cookie: {} }
+  }, { id: '42', name: 'Fixture', artist: 'Demo' })
+  assert.equal(body.url, 'https://m7.music.126.net/trans.mp3')
+  assert.equal(body.type, 'mp3')
+  assert.ok(calls.includes('song_download_url'))
+})
+
+test('an unmatched hard cloud file is marked with its uploaded format', async () => {
+  const secret = 'x'.repeat(32)
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'vip-session' } }, secret, 'session', 60)
+  const ask = (rpc, query) => handleApi(req('/api/netease', { uid: '1', method: 'song_url', query }, 'chuting_session=' + token), env, rpc).then(r => r.json())
+  const body = await ask(async (method) => {
+    if (method === 'song_detail') return { body: { code: 200, songs: [{ id: 42, pc: { sid: 0, fn: 'unmatched.APE' }, privilege: { cs: true } }] }, cookie: {} }
+    if (method === 'song_search') return { body: { code: 200, result: { songs: [] } }, cookie: {} }
+    return { body: { code: 200, data: [{ id: 42, url: 'https://m701.music.126.net/up.ape', br: 850000, type: 'ape', time: 233000, fee: 0, level: 'lossless' }] }, cookie: {} }
+  }, { id: '42', name: 'Fixture Three', artist: 'Demo' })
+  assert.equal(body.type, 'ape')
+  assert.equal(body.cloud, true)
+  assert.equal(body.format, 'ape')
+  assert.match(body.url, /up\.ape/)
 })

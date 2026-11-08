@@ -46,14 +46,36 @@ export function audioUrl(value) {
     return url.toString()
   } catch { return null }
 }
-const HARD_AUDIO = new Set(['flac', 'wav', 'ape', 'aiff', 'dsf', 'dff'])
-const LOSSY_AUDIO = new Set(['mp3', 'aac', 'm4a'])
-const HARD_LEVELS = new Set(['lossless', 'hires', 'jyeffect', 'sky', 'jymaster'])
+const HARD_AUDIO = new Set(['flac', 'wav', 'ape', 'aiff', 'dsf', 'dff', 'alac', 'wma'])
+const SIMPLE_LOSSY = new Set(['mp3', 'aac', 'ogg', 'opus'])
+const HARD_LEVELS = new Set(['lossless', 'hires', 'jyeffect', 'sky', 'jymaster', 'dolby'])
+const IMMERSIVE = new Set(['jyeffect', 'sky', 'jymaster', 'dolby'])
+export function audioKind(answer) {
+  if (!answer) return ''
+  const type = String(answer.type || '').toLowerCase()
+  const encode = String(answer.encodeType || '').toLowerCase()
+  const format = String(answer.format || '').toLowerCase()
+  let ext = ''
+  try {
+    const path = new URL(answer.url || '', 'https://music.126.net').pathname.toLowerCase()
+    ext = (path.match(/\.([a-z0-9]{2,5})$/) || [])[1] || ''
+  } catch {}
+  return format || encode || type || ext
+}
 export function hardAudio(answer) {
   if (!answer?.url) return false
-  if (HARD_AUDIO.has(answer.type)) return true
-  if (HARD_LEVELS.has(answer.level)) return true
-  return answer.br > 320000 && Boolean(answer.type) && !LOSSY_AUDIO.has(answer.type)
+  const type = String(answer.type || answer.encodeType || '').toLowerCase()
+  const encode = String(answer.encodeType || '').toLowerCase()
+  const level = String(answer.level || '').toLowerCase()
+  const kind = audioKind(answer)
+  const br = Number(answer.br) || 0
+  if (SIMPLE_LOSSY.has(type) || SIMPLE_LOSSY.has(kind)) return false
+  if (HARD_AUDIO.has(type) || HARD_AUDIO.has(encode) || HARD_AUDIO.has(kind)) return true
+  const boxed = type === 'm4a' || type === 'mp4' || kind === 'm4a' || kind === 'mp4'
+  if (boxed && (encode === 'alac' || IMMERSIVE.has(level) || (['lossless', 'hires'].includes(level) && br > 320000))) return true
+  if (boxed && encode !== 'alac' && !IMMERSIVE.has(level)) return false
+  if (HARD_LEVELS.has(level)) return true
+  return br > 320000 && Boolean(type) && !SIMPLE_LOSSY.has(type) && type !== 'm4a'
 }
 // A null URL is not a codec problem. fee 1/4 is membership or a purchase; cannotListenReason 1
 // is the copyright block the public song-url API returns for tracks the account cannot play.
@@ -64,13 +86,47 @@ function listenBlock(item) {
   if (why === 1) return 'copyright'
   return 'unavailable'
 }
+function dataRows(body) {
+  if (Array.isArray(body?.data)) return body.data
+  if (body?.data && typeof body.data === 'object') return [body.data]
+  return []
+}
 export function playable(body, id) {
-  const item = (body?.data || []).find(x => String(x.id) === String(id)) || body?.data?.[0] || {}
+  const rows = dataRows(body)
+  const item = rows.find(x => String(x.id) === String(id)) || rows[0] || {}
   const url = audioUrl(item.url)
   if (!url) return { id: String(id), url: null, reason: listenBlock(item) }
   // freeTrialInfo is only set when this account lacks the rights: the URL is then a preview clip.
   const trial = item.freeTrialInfo ? { start: Number(item.freeTrialInfo.start) || 0, end: Number(item.freeTrialInfo.end) || 0 } : null
-  return { id: String(id), url, type: String(item.type || '').toLowerCase(), br: Number(item.br) || 0, duration: Number(item.time) || 0, level: String(item.level || '').toLowerCase(), trial }
+  const encodeType = String(item.encodeType || '').toLowerCase()
+  const out = {
+    id: String(id), url,
+    type: String(item.type || item.encodeType || '').toLowerCase(),
+    br: Number(item.br) || 0,
+    duration: Number(item.time) || 0,
+    level: String(item.level || '').toLowerCase(),
+    trial
+  }
+  if (encodeType) out.encodeType = encodeType
+  return out
+}
+export function fileExt(name) {
+  const m = String(name || '').toLowerCase().match(/\.([a-z0-9]{2,5})$/)
+  return m ? m[1] : ''
+}
+export function cloudHint(song, item) {
+  const pc = song?.pc && typeof song.pc === 'object' ? song.pc : null
+  const cs = Boolean(song?.privilege?.cs)
+  const t = Number(song?.t)
+  const uf = item?.uf && typeof item.uf === 'object'
+  const sid = Number(pc?.sid)
+  const fromFn = fileExt(pc?.fn)
+  const fromUf = String((uf && (item.uf.type || item.uf.encodeType)) || '').toLowerCase()
+  return {
+    cloud: Boolean(pc || cs || uf || t === 1 || t === 2),
+    sid: Number.isFinite(sid) && sid > 0 ? String(sid) : '',
+    format: fromFn || fromUf
+  }
 }
 // Cloud-drive uploads exist only as the uploaded file (often ALAC m4a, which Chrome cannot decode).
 // The same song in NetEase's catalogue usually has an MP3, so match by title, then artist.
@@ -82,6 +138,60 @@ export function pickMatch(songs, name, artist, skipId) {
   const same = (songs || []).filter(s => String(s?.id) !== String(skipId) && squash(s?.name) === want)
   const byArtist = same.find(s => artists.length && (s.ar || []).some(a => artists.includes(squash(a?.name))))
   return byArtist || (artists.length ? null : same[0]) || null
+}
+async function askPlayable(upstream, method, query, session, id) {
+  return playable((await upstream(method, query, session.cookie, session.account.uid)).body, id)
+}
+function takeLossy(current, next, id, extra = {}) {
+  if (!next?.url || hardAudio(next)) return current
+  if (next.trial && current.url && !current.trial) return current
+  return { ...next, id: String(id), ...extra }
+}
+// After standard + legacy, a cloud upload may still be the original APE / FLAC / ALAC file.
+// Prefer a matched catalogue id (pc.sid, then a title search), then a transcoded download URL.
+async function recoverCloudAudio(answer, query, session, upstream) {
+  if (!answer?.url || !hardAudio(answer)) return answer
+  const id = query.id
+  let hint = { cloud: false, sid: '', format: '' }
+  try {
+    const detail = (await upstream('song_detail', { ids: String(id) }, session.cookie, session.account.uid)).body
+    const song = (detail?.songs || []).find(s => String(s?.id) === String(id)) || detail?.songs?.[0]
+    hint = cloudHint(song)
+  } catch {}
+  if (hint.sid && hint.sid !== String(id)) {
+    try {
+      const twin = await askPlayable(upstream, 'song_url', { id: hint.sid, level: 'standard', encodeType: 'mp3' }, session, hint.sid)
+      const next = takeLossy(answer, twin, id, { matched: hint.sid })
+      if (next !== answer && !hardAudio(next) && !next.trial) return next
+    } catch {}
+  }
+  const name = String(query.name || '').slice(0, 200)
+  if (name) {
+    try {
+      const artist = String(query.artist || '').slice(0, 200)
+      const found = (await upstream('song_search', { s: `${name} ${artist}`.trim() }, session.cookie, session.account.uid)).body
+      const match = pickMatch(found?.result?.songs, name, artist, id)
+      if (match) {
+        const twin = await askPlayable(upstream, 'song_url', { id: String(match.id), level: 'standard', encodeType: 'mp3' }, session, match.id)
+        const next = takeLossy(answer, twin, id, { matched: String(match.id) })
+        if (next !== answer && !hardAudio(next) && !next.trial) return next
+      }
+    } catch {}
+  }
+  try {
+    const dl = await askPlayable(upstream, 'song_download_url', { id, br: 128000 }, session, id)
+    answer = takeLossy(answer, dl, id)
+  } catch {}
+  if (answer.url && hardAudio(answer)) {
+    try {
+      const dl = await askPlayable(upstream, 'song_download_url_v1', { id, level: 'standard', encodeType: 'mp3' }, session, id)
+      answer = takeLossy(answer, dl, id)
+    } catch {}
+  }
+  if (answer.url && hardAudio(answer) && (hint.cloud || hint.format)) {
+    return { ...answer, cloud: true, format: hint.format || answer.type || answer.encodeType }
+  }
+  return answer
 }
 // Dependency injection is used by tests, never controlled by HTTP input.
 export async function handleApi(request, env, upstream = callNetease) {
@@ -167,19 +277,7 @@ export async function handleApi(request, env, upstream = callNetease) {
           if (legacy.url && !hardAudio(legacy) && (!legacy.trial || answer.trial)) answer = legacy
         } catch {}
       }
-      // Still a lossless-only file (typically a cloud-drive upload): play the catalogue copy instead.
-      const name = String(body.query?.name || '').slice(0, 200)
-      if (answer.url && hardAudio(answer) && name) {
-        try {
-          const artist = String(body.query?.artist || '').slice(0, 200)
-          const found = (await upstream('song_search', { s: `${name} ${artist}`.trim() }, session.cookie, session.account.uid)).body
-          const match = pickMatch(found?.result?.songs, name, artist, body.query?.id)
-          if (match) {
-            const twin = playable((await upstream('song_url', { id: String(match.id), level: 'standard', encodeType: 'mp3' }, session.cookie, session.account.uid)).body, match.id)
-            if (twin.url && !hardAudio(twin) && !twin.trial) answer = { ...twin, id: String(body.query?.id), matched: String(match.id) }
-          }
-        } catch {}
-      }
+      answer = await recoverCloudAudio(answer, body.query || {}, session, upstream)
       return json(answer)
     }
     // Upstream payload is returned only to this authenticated browser; never cached/logged.
