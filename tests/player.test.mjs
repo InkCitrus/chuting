@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPlayer, PLAYER_LINES, FALLBACK_QUERY, playErrorMessage } from '../web/player.js'
+import { createPlayer, PLAYER_LINES, FALLBACK_QUERY, playErrorMessage, audioHosts } from '../web/player.js'
 
 class FakeAudio extends EventTarget {
   constructor() {
@@ -21,7 +21,7 @@ class FakeAudio extends EventTarget {
       const err = Object.assign(new Error(this._fail), { name: this._fail })
       return Promise.reject(err)
     }
-    if (this.src.includes('bad-flac') || this.src.includes('bad-host')) {
+    if (this.src.includes('bad-flac') || this.src.includes('bad-host') || (this.src.includes('zone-miss') && this.src.includes('//m701.'))) {
       // Browsers clear `paused` as soon as play() is called, then reject when the bytes are unusable.
       this.paused = false
       this.error = { code: 4 }
@@ -315,6 +315,39 @@ test('a slower song cannot overwrite the one that started after it', async () =>
     assert.equal(player.current.song_id, 'new')
     assert.equal(player.playing, true)
     assert.equal(note.textContent.includes('格式') || note.textContent.includes('没放出来'), false)
+  } finally {
+    env.restore()
+  }
+})
+
+test('audioHosts tries the given edge first, then its storage twin', () => {
+  assert.deepEqual(audioHosts('https://m701.music.126.net/a/ymusic/x.mp3?v=1'), ['https://m701.music.126.net/a/ymusic/x.mp3?v=1', 'https://m7.music.126.net/a/ymusic/x.mp3?v=1'])
+  assert.deepEqual(audioHosts('https://m8.music.126.net/x.mp3'), ['https://m8.music.126.net/x.mp3', 'https://m801.music.126.net/x.mp3'])
+  assert.deepEqual(audioHosts('https://vodkgeyttp9.vod.126.net/obj/a.mp3'), ['https://vodkgeyttp9.vod.126.net/obj/a.mp3'])
+  assert.deepEqual(audioHosts('not a url'), ['not a url'])
+})
+
+test('a zone miss on one edge plays from the twin edge without asking NetEase again', async () => {
+  const env = install('probably')
+  try {
+    const { els, mini, note } = mount()
+    const queries = []
+    const player = createPlayer({
+      els, mini,
+      getUrl: async (_event, query = {}) => {
+        queries.push({ ...query })
+        return { url: 'https://m701.music.126.net/2026/ymusic/zone-miss.mp3', type: 'mp3', br: 320000, duration: 152000 }
+      },
+      coverFor: () => null,
+      onEnded() {},
+      onOpen() {}
+    })
+    await player.play({ song_id: '1', name: 'Hold Me Now', artists: 'a' })
+    await new Promise(r => setTimeout(r, 50))
+    assert.equal(queries.length, 1)
+    assert.equal(env.audio().src, 'https://m7.music.126.net/2026/ymusic/zone-miss.mp3')
+    assert.equal(player.playing, true)
+    assert.notEqual(note.textContent, PLAYER_LINES.failed)
   } finally {
     env.restore()
   }
