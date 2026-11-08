@@ -2112,7 +2112,7 @@ function playRelative(delta) {
 player = createPlayer({
   els: { root: $('player'), dialog: $('songDialog'), play: $('playBtn'), seek: $('seek'), scrub: $('scrub'), cur: $('curTime'), dur: $('durTime'), note: $('playerNote'), volume: finePointer ? $('volume') : null },
   mini: { root: $('miniPlayer'), play: $('miniPlay'), open: $('miniOpen'), close: $('miniClose'), title: $('miniTitle'), artist: $('miniArtist'), cover: $('miniCover') },
-  getUrl: (event, query = {}) => remote('/api/netease', { method: 'song_url', query: { id: String(event.song_id), ...query }, uid: state.account?.uid }),
+  getUrl: (event, query = {}) => remote('/api/netease', { method: 'song_url', query: { id: String(event.song_id), name: event.name || '', artist: event.artists || '', ...query }, uid: state.account?.uid }),
   coverFor: event => (event.cover ? px => coverSize(event.cover, px) : null),
   onEnded: () => playRelative(1),
   onOpen: event => showSong(state.view.find(x => x.song_id === event.song_id) || event)

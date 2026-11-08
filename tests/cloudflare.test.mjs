@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { createDecipheriv } from 'node:crypto'
 import { eapi, weapi, endpoint, ApiError, callNetease } from '../cloudflare/netease.mjs'
 import { seal, unseal, sessionCookie } from '../cloudflare/session.mjs'
-import { handleApi } from '../cloudflare/worker.mjs'
+import { handleApi, pickMatch } from '../cloudflare/worker.mjs'
 const require = createRequire(import.meta.url)
 const upstreamCrypto = require('@neteasecloudmusicapienhanced/api/util/crypto.js')
 const secret = 'test-only-secret-32-characters-long-123456789'
@@ -183,4 +183,39 @@ test('avatarUrl is forwarded from login_status and stripped of query params', as
   const rpc = async () => ({ body: { profile: { userId: 1, nickname: 'Test', avatarUrl: '//p2.music.126.net/x/y.png?param=1' } }, cookie: {} })
   const body = await (await handleApi(req('/api/netease', { uid: '1', method: 'login_status' }, 'chuting_session=' + token), env, rpc)).json()
   assert.deepEqual(body, { account: { uid: '1', nickname: 'Test', avatarUrl: 'https://p2.music.126.net/x/y.png' } })
+})
+
+test('pickMatch finds the catalogue copy of an uploaded song by title and artist', () => {
+  const songs = [
+    { id: 1, name: '鳥の詩', ar: [{ name: 'Someone Else' }] },
+    { id: 2, name: '鳥の詩', ar: [{ name: 'Lia' }] },
+    { id: 3, name: '鳥の詩 (Remix)', ar: [{ name: 'Lia' }] }
+  ]
+  assert.equal(pickMatch(songs, '鳥の詩', 'Lia', 99).id, 2)
+  assert.equal(pickMatch(songs, ' 鳥の詩 ', 'lia / Key', 99).id, 2)
+  assert.equal(pickMatch(songs, '鳥の詩', 'Nobody', 99), null)
+  assert.equal(pickMatch(songs, '鳥の詩', '未知歌手', 99).id, 1)
+  assert.equal(pickMatch(songs, '鳥の詩', 'Lia', 2), null)
+  assert.equal(pickMatch([], '鳥の詩', 'Lia', 99), null)
+})
+
+test('a lossless-only upload plays the matched catalogue MP3 instead', async () => {
+  const secret = 'x'.repeat(32)
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'vip-session' } }, secret, 'session', 60)
+  const ask = (rpc, query) => handleApi(req('/api/netease', { uid: '1', method: 'song_url', query }, 'chuting_session=' + token), env, rpc).then(r => r.json())
+  const calls = []
+  const body = await ask(async (method, query) => {
+    calls.push([method, query.id || query.s])
+    if (method === 'song_search') return { body: { code: 200, result: { songs: [{ id: 555, name: 'My Dearest', ar: [{ name: 'supercell' }] }] } }, cookie: {} }
+    if (method === 'song_url' && query.id === '555') return { body: { code: 200, data: [{ id: 555, url: 'http://m801.music.126.net/cat.mp3', br: 128000, type: 'mp3', time: 290000, fee: 0, level: 'standard' }] }, cookie: {} }
+    return { body: { code: 200, data: [{ id: 42, url: 'https://m701.music.126.net/up.m4a', br: 900000, type: 'm4a', time: 290000, fee: 0, level: 'lossless' }] }, cookie: {} }
+  }, { id: '42', name: 'My Dearest', artist: 'supercell' })
+  assert.equal(body.url, 'https://m801.music.126.net/cat.mp3')
+  assert.equal(body.id, '42')
+  assert.equal(body.matched, '555')
+  assert.ok(calls.some(([m, s]) => m === 'song_search' && s === 'My Dearest supercell'))
+  // No title sent: no search, the original answer stands.
+  const plain = await ask(async (method) => ({ body: { code: 200, data: [{ id: 42, url: 'https://m701.music.126.net/up.m4a', br: 900000, type: 'm4a', time: 1, fee: 0, level: 'lossless' }] }, cookie: {} }), { id: '42' })
+  assert.equal(plain.type, 'm4a')
 })

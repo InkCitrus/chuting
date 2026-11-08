@@ -72,6 +72,17 @@ export function playable(body, id) {
   const trial = item.freeTrialInfo ? { start: Number(item.freeTrialInfo.start) || 0, end: Number(item.freeTrialInfo.end) || 0 } : null
   return { id: String(id), url, type: String(item.type || '').toLowerCase(), br: Number(item.br) || 0, duration: Number(item.time) || 0, level: String(item.level || '').toLowerCase(), trial }
 }
+// Cloud-drive uploads exist only as the uploaded file (often ALAC m4a, which Chrome cannot decode).
+// The same song in NetEase's catalogue usually has an MP3, so match by title, then artist.
+const squash = value => String(value || '').toLowerCase().normalize('NFKC').replace(/[\s\-_~·・'"’“”()（）\[\]【】「」『』.,，。!！?？]/g, '')
+export function pickMatch(songs, name, artist, skipId) {
+  const want = squash(name)
+  if (!want) return null
+  const artists = String(artist || '').split(/[\/、,&]|\s+feat\.?\s+/i).map(squash).filter(a => a && !['未知歌手', '歌手未知', 'unknown', 'unknownartist'].includes(a))
+  const same = (songs || []).filter(s => String(s?.id) !== String(skipId) && squash(s?.name) === want)
+  const byArtist = same.find(s => artists.length && (s.ar || []).some(a => artists.includes(squash(a?.name))))
+  return byArtist || (artists.length ? null : same[0]) || null
+}
 // Dependency injection is used by tests, never controlled by HTTP input.
 export async function handleApi(request, env, upstream = callNetease) {
   const url = new URL(request.url)
@@ -138,6 +149,19 @@ export async function handleApi(request, env, upstream = callNetease) {
         try {
           const legacy = playable((await upstream('song_url_legacy', { id: body.query?.id }, session.cookie, session.account.uid)).body, body.query?.id)
           if (legacy.url && !hardAudio(legacy) && (!legacy.trial || answer.trial)) answer = legacy
+        } catch {}
+      }
+      // Still a lossless-only file (typically a cloud-drive upload): play the catalogue copy instead.
+      const name = String(body.query?.name || '').slice(0, 200)
+      if (answer.url && hardAudio(answer) && name) {
+        try {
+          const artist = String(body.query?.artist || '').slice(0, 200)
+          const found = (await upstream('song_search', { s: `${name} ${artist}`.trim() }, session.cookie, session.account.uid)).body
+          const match = pickMatch(found?.result?.songs, name, artist, body.query?.id)
+          if (match) {
+            const twin = playable((await upstream('song_url', { id: String(match.id), level: 'standard', encodeType: 'mp3' }, session.cookie, session.account.uid)).body, match.id)
+            if (twin.url && !hardAudio(twin) && !twin.trial) answer = { ...twin, id: String(body.query?.id), matched: String(match.id) }
+          }
         } catch {}
       }
       return json(answer)
