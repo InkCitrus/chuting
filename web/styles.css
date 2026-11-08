@@ -1303,7 +1303,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 @keyframes travel-in { from { opacity: 0 } }
 
 /* 隧道：四面密铺封面，向消失点流去 */
-.travel-stage { --travel-glow: 196 142 78; --travel-perspective: 900px; position: absolute; inset: 0; perspective: var(--travel-perspective); perspective-origin: 50% 46%; overflow: hidden; contain: strict }
+.travel-stage { --travel-glow: 196 142 78; --travel-perspective: 1200px; position: absolute; inset: 0; perspective: var(--travel-perspective); perspective-origin: 50% 48%; overflow: hidden; contain: layout style }
 .travel-back { position: absolute; inset: -12%; z-index: 0; overflow: hidden; pointer-events: none; background: #0c0b0a }
 .travel-back img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.28);
   filter: none; opacity: .58 }
@@ -1368,17 +1368,15 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 .travel-skip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; margin: 0; padding: 18px 24px calc(16px + env(safe-area-inset-bottom));
   text-align: center; font-size: 12px; letter-spacing: .16em; color: rgb(243 238 230 / .5);
   background: linear-gradient(180deg, transparent, rgb(12 11 10 / .35) 70%) }
-.travel.is-arrive .travel-stage { visibility: hidden; pointer-events: none }
+.travel.is-arrive .travel-stage { pointer-events: none }
 .travel.is-arrive .travel-clock,
 .travel.is-arrive .travel-skip,
-.travel.is-arrive .travel-tunnel,
 .travel.is-arrive .travel-hero-card,
 .travel.is-arrive .travel-streaks,
 .travel.is-arrive .travel-bloom,
 .travel.is-arrive .travel-chroma,
 .travel.is-arrive .travel-flash,
-.travel.is-arrive .travel-grain,
-.travel.is-arrive .travel-back { opacity: 0; pointer-events: none }
+.travel.is-arrive .travel-grain { opacity: 0; pointer-events: none }
 ::view-transition-old(root) { animation: none; opacity: 0; mix-blend-mode: normal }
 ::view-transition-new(root) { animation: none; mix-blend-mode: normal }
 ::view-transition-group(travel-hero) { animation-duration: .55s; animation-timing-function: cubic-bezier(.22, 1, .36, 1) }
@@ -1392,8 +1390,8 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 .travel-arrive:focus { outline: none }
 .arrive-bg { position: absolute; inset: 0; overflow: hidden; background: #0c0b0a }
 .arrive-bg-layer { position: absolute; inset: 0 }
-.arrive-bg img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.35);
-  filter: blur(64px) saturate(1.5) brightness(.82); opacity: .9 }
+.arrive-bg img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.28);
+  filter: none; opacity: .62 }
 .arrive-veil { position: absolute; inset: 0; pointer-events: none;
   background:
     radial-gradient(120% 90% at 28% 48%, transparent 0%, rgb(12 11 10 / .28) 55%, rgb(12 11 10 / .78) 100%),

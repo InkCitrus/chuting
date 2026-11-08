@@ -1470,8 +1470,14 @@ function arriveImg(event, className = '') {
 function paintArriveBg(event, { fade = false } = {}) {
   const bg = $('arriveBg')
   if (!bg) return
-  const img = arriveImg(event)
-  if (!img) { if (!fade) bg.replaceChildren(); return }
+  const raw = event?.cover
+  if (!raw) { if (!fade) bg.replaceChildren(); return }
+  // Same cheap wash as the tunnel: a 32px thumb, no live CSS blur to tear down on return.
+  const img = new Image()
+  img.alt = ''
+  img.decoding = 'async'
+  img.referrerPolicy = 'no-referrer'
+  img.src = coverSize(raw, TRAVEL_BACK_PX)
   const layer = node('div', 'arrive-bg-layer')
   layer.append(img)
   if (!fade || !motion || reduced.matches) { bg.replaceChildren(layer); return }
@@ -1798,22 +1804,42 @@ function returnToPresent({ fromPop = false } = {}) {
   const canRewind = motion && !reduced.matches && travel.phase === 'arrive' && !fromPop
   if (canRewind) {
     travel.phase = 'back'
-    if ($('travelArrive')) $('travelArrive').hidden = true
-    $('travelOverlay')?.classList.remove('is-arrive')
-    $('travelOverlay')?.classList.add('is-going')
-    if (!$('travelTunnel')?.children.length) buildTravelTunnel(travel.event)
-    travel.duration = TRAVEL_BACK_MS
-    travel.start = performance.now()
-    const from = travel.toMs, to = Date.now()
-    const tick = now => {
-      const raw = Math.min(1, (now - travel.start) / travel.duration)
-      const t = easeTravel(raw)
-      poseTravelCards(t, true)
-      paintTravelClock(lerp(from, to, t))
-      if (raw < 1 && travel.phase === 'back') travel.raf = requestAnimationFrame(tick)
-      else if (travel.phase === 'back') finishTravel({ fromPop })
+    const overlay = $('travelOverlay')
+    // Reuse the going tiles when they are still in the DOM; rebuild only
+    // from already-decoded covers so the rewind never flashes empty faces.
+    if (!$('travelTunnel')?.children.length) {
+      const cached = gatherTravelArts(travel.event)
+      buildTravelTunnel(travel.event, cached.length ? cached : undefined)
     }
-    travel.raf = requestAnimationFrame(tick)
+    syncTravelStageLayout()
+    paintTravelBack(travel.event)
+    // Reveal the 3D stage under the still-visible arrival page so GPU
+    // layers are warm before we hide the arrival UI and start motion.
+    overlay?.classList.add('is-going')
+    overlay?.classList.remove('is-arrive')
+    if ($('travelStage')) $('travelStage').hidden = false
+    poseTravelCards(0, true)
+    paintTravelClock(travel.toMs, true)
+    travel.duration = TRAVEL_BACK_MS
+    const from = travel.toMs, to = Date.now()
+    const begin = () => {
+      if (travel.phase !== 'back') return
+      if ($('travelArrive')) $('travelArrive').hidden = true
+      travel.start = performance.now()
+      const tick = now => {
+        const raw = Math.min(1, (now - travel.start) / travel.duration)
+        const t = easeTravel(raw)
+        poseTravelCards(t, true)
+        paintTravelClock(lerp(from, to, t))
+        if (raw < 1 && travel.phase === 'back') travel.raf = requestAnimationFrame(tick)
+        else if (travel.phase === 'back') finishTravel({ fromPop })
+      }
+      travel.raf = requestAnimationFrame(tick)
+    }
+    travel.raf = requestAnimationFrame(() => {
+      poseTravelCards(0, true)
+      travel.raf = requestAnimationFrame(begin)
+    })
     return
   }
   finishTravel({ fromPop })
@@ -1823,16 +1849,24 @@ function finishTravel({ fromPop = false } = {}) {
   const overlay = $('travelOverlay')
   travel.phase = ''
   travel.open = false
-  document.body.classList.remove('has-travel')
-  overlay?.classList.remove('is-arrive', 'is-going', 'is-closing')
-  if (overlay?.open) overlay.close()
-  if (!fromPop && history.state?.chutingModal === 'travelOverlay') {
-    modalLayer.fromPop = true
-    history.back()
-  }
-  if (modalLayer.id === 'travelOverlay') modalLayer.id = null
+  if ($('travelStage')) $('travelStage').hidden = true
   $('travelTunnel')?.replaceChildren()
-  player?.render()
+  const hero = $('travelHero')
+  if (hero) { hero.replaceChildren(); hero.hidden = true; hero._pose = null; hero._shade = null }
+  const revealHome = () => {
+    document.body.classList.remove('has-travel')
+    overlay?.classList.remove('is-arrive', 'is-going', 'is-closing')
+    if (overlay?.open) overlay.close()
+    if (!fromPop && history.state?.chutingModal === 'travelOverlay') {
+      modalLayer.fromPop = true
+      history.back()
+    }
+    if (modalLayer.id === 'travelOverlay') modalLayer.id = null
+    requestAnimationFrame(() => { player?.render() })
+  }
+  // Let the home timeline paint under the still-open overlay for a frame
+  // so closing it does not composite the long list with leftover 3D tiles.
+  requestAnimationFrame(revealHome)
 }
 
 /* ---------- 弹窗 ---------- */

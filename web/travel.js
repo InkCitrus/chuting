@@ -130,19 +130,21 @@ export function travelStageLayout(width, height, quality = 'full') {
       wallX: 470,
       wallY: 278,
       faceCounts,
-      perspective: 900,
+      perspective: 1200,
       spacing: 310,
       zMin: -1640,
-      rotateX: 0,
-      rotateY: 0,
+      rotateX: lite ? 16 : 24,
+      rotateY: lite ? 20 : 28,
+      cornerInset: lite ? 64 : 80,
       rings,
       tiles: perRing * rings,
       coverPx: lite ? TRAVEL_COVER_PX_LITE : TRAVEL_COVER_PX_DESKTOP
     }
   }
   // Side walls sit inside a phone frame so covers stream through the whole
-  // portrait. Cards face the camera (no wall tilt) so perspective never clips
-  // a square into a triangle; fewer tiles keep a phone GPU at a drawable pace.
+  // portrait. Walls stay tilted; cards are inset from the corners and fade
+  // before they hit the near plane so perspective does not clip them into
+  // triangles. Fewer tiles keep a phone GPU at a drawable pace.
   const faceCounts = lite ? [3, 3, 2, 2] : [5, 5, 3, 3]
   const perRing = faceCounts.reduce((sum, count) => sum + count, 0)
   const rings = lite ? 3 : 4
@@ -152,11 +154,12 @@ export function travelStageLayout(width, height, quality = 'full') {
     wallX: Math.round(Math.min(178, Math.max(128, w * 0.42))),
     wallY: Math.round(Math.min(380, Math.max(248, h * 0.40))),
     faceCounts,
-    perspective: 640,
+    perspective: 880,
     spacing: 250,
     zMin: -1420,
-    rotateX: 0,
-    rotateY: 0,
+    rotateX: lite ? 10 : 14,
+    rotateY: lite ? 12 : 16,
+    cornerInset: lite ? 48 : 58,
     rings,
     tiles: perRing * rings,
     coverPx: lite ? TRAVEL_COVER_PX_LITE : TRAVEL_COVER_PX_MOBILE
@@ -192,8 +195,11 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
 
   const wallX = layout?.wallX ?? 470
   const wallY = layout?.wallY ?? 278
-  const pitchY = across > 1 ? (2 * wallY) / (across - 1) : 0
-  const pitchX = across > 1 ? (2 * wallX) / (across - 1) : 0
+  const inset = Math.max(0, Number(layout?.cornerInset) || 0)
+  const spanX = Math.max(40, wallX - inset)
+  const spanY = Math.max(40, wallY - inset)
+  const pitchY = across > 1 ? (2 * spanY) / (across - 1) : 0
+  const pitchX = across > 1 ? (2 * spanX) / (across - 1) : 0
   const offset = col - (across - 1) / 2
   const tiltY = layout?.rotateY ?? 28
   const tiltX = layout?.rotateX ?? 24
@@ -207,10 +213,13 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
   const brightness = 0.2 + 0.8 * nearness
   let opacity = 1
   const farFade = layout?.portrait ? 160 : 90
-  const nearStart = layout ? 160 : 280
-  const nearSpan = layout ? 180 : 140
-  if (z > nearStart) opacity = Math.max(0, 1 - (z - nearStart) / nearSpan)
-  else if (z < zMin + farFade) {
+  const zFront = zMin + length
+  const nearSpan = layout ? Math.max(260, (layout.spacing || 310) + 40) : 140
+  const nearPad = 28
+  if (z >= 0) opacity = 0
+  else if (z > zFront - nearSpan) {
+    opacity = Math.max(0, (zFront - z - nearPad) / Math.max(1, nearSpan - nearPad))
+  } else if (z < zMin + farFade) {
     opacity = Math.max(0, (z - zMin) / farFade)
     if (z < zMin + 36) opacity = 0
   }
