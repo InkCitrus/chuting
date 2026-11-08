@@ -1,8 +1,8 @@
 'use strict'
 import { createBackend, remote } from './backend.js'
-import { insights } from './insights.js'
+import { insights, artistRanks } from './insights.js'
 import { renderPoster, sharePayload, shareMethod } from './share.js'
-import { coverSize } from './archive-core.js'
+import { coverSize, coverUrl } from './archive-core.js'
 
 // Rotator / copy / player are nice-to-have. If a stale cache drops one of them, the archive
 // still opens: welcome copy stays put, rotation and playback quietly no-op.
@@ -221,6 +221,53 @@ function tile(event, className, px, eager, defer = false) {
   else if (event.cover) box.append(coverImg(event.cover, px, eager))
   return box
 }
+const PORTRAIT_TTL = 30 * 86400000
+const DEFAULT_ARTIST_PIC = /\/(18686200114669622|5639395138885805)(\.|$)/
+function readPortraitCache() {
+  try { return JSON.parse(localStorage.getItem('chuting-artist-portraits') || '{}') } catch { return {} }
+}
+function writePortraitCache(cache) {
+  try {
+    const keys = Object.keys(cache)
+    if (keys.length > 200) for (const key of keys.slice(0, keys.length - 200)) delete cache[key]
+    localStorage.setItem('chuting-artist-portraits', JSON.stringify(cache))
+  } catch { /* quota or private mode */ }
+}
+function squashName(value) {
+  return String(value || '').toLowerCase().normalize('NFKC').replace(/\s+/g, '')
+}
+async function fetchArtistPortrait(name) {
+  const key = String(name || '').trim()
+  if (!key) return ''
+  const cache = readPortraitCache()
+  const hit = cache[key]
+  if (hit && Date.now() - hit.checked_ms < PORTRAIT_TTL) return hit.picUrl || ''
+  if (!state.account?.uid) return hit?.picUrl || ''
+  try {
+    const data = await remote('/api/netease', { method: 'artist_search', query: { s: key.slice(0, 80) }, uid: state.account.uid })
+    const artists = data?.artists || []
+    const want = squashName(key)
+    const match = artists.find(a => squashName(a.name) === want)
+      || artists.find(a => squashName(a.name).includes(want) || want.includes(squashName(a.name)))
+      || artists[0]
+    let pic = coverUrl(match?.picUrl || '')
+    if (pic && DEFAULT_ARTIST_PIC.test(pic)) pic = ''
+    cache[key] = { picUrl: pic, checked_ms: Date.now() }
+    writePortraitCache(cache)
+    return pic
+  } catch { return hit?.picUrl || '' }
+}
+async function hydrateArtistPortrait() {
+  const item = hl.items.find(entry => entry.kind === 'artist')
+  if (!item?.title) return
+  const pic = await fetchArtistPortrait(item.title)
+  if (!pic || item.portrait === pic) return
+  item.portrait = pic
+  const slot = document.querySelector('.hl-slide[data-kind="artist"] .hl-portrait')
+  if (!slot) return
+  slot.replaceChildren(coverImg(pic, 400, true))
+}
+
 // Timeline rows get their <img> after the rows are on screen, keeping image setup off the first paint.
 let hydrateFrame = 0
 function hydrateCovers() {
@@ -428,7 +475,7 @@ function renderHighlights() {
   }
   box.hidden = !items.length
   document.querySelector('.hero').classList.toggle('has-highlights', items.length > 0)
-  if (sig === hl.sig) return
+  if (sig === hl.sig) { hydrateArtistPortrait(); return }
   hl.sig = sig; hl.items = items
   const stage = $('hlStage'), dots = $('hlDots')
   stage.replaceChildren(); dots.replaceChildren()
@@ -442,6 +489,7 @@ function renderHighlights() {
   $('hlPlay').hidden = !motion || items.length < 2
   $('hlPrev').hidden = $('hlNext').hidden = items.length < 2
   setSlide(Math.min(hl.index, items.length - 1), { instant: true })
+  hydrateArtistPortrait()
 }
 function slideNode(item, i, total) {
   const slide = node('div', 'hl-slide')
@@ -457,6 +505,16 @@ function slideNode(item, i, total) {
     if (item.cover) label.append(coverImg(item.cover, 120, i === 0))
     disc.append(label)
     art.append(disc, tile(item.event, 'hl-sleeve', 500, i === 0))
+  } else if (item.kind === 'artist') {
+    const portrait = node('span', 'hl-portrait')
+    const src = item.portrait || item.covers?.[0]?.cover
+    if (src) portrait.append(coverImg(src, 400, i === 0))
+    else {
+      const glyphEl = node('span', 'hl-portrait-glyph cover-tile', item.title.slice(0, 1))
+      tint(glyphEl, { name: item.title, artists: item.title })
+      portrait.append(glyphEl)
+    }
+    art.append(portrait)
   } else {
     const grid = node('span', `hl-mosaic n${Math.max(1, item.covers.length)}`)
     for (const e of item.covers.length ? item.covers : []) grid.append(tile(e, 'hl-cell', 250, i === 0))
@@ -490,7 +548,7 @@ function setSlide(i, options = {}) {
     if (k === i) dot.setAttribute('aria-current', 'true'); else dot.removeAttribute('aria-current')
   }
   if (options.announce) $('hlLive').textContent = `${hl.items[i].kicker}：${hl.items[i].title}`
-  applyTone(document.querySelector('.hero'), slides[i].querySelector('.hl-sleeve .cover-img, .hl-cell .cover-img'))
+  applyTone(document.querySelector('.hero'), slides[i].querySelector('.hl-sleeve .cover-img, .hl-portrait .cover-img, .hl-cell .cover-img'))
   if (!options.instant) document.dispatchEvent(new Event('chuting:slide'))
   restartTimer()
 }
@@ -936,6 +994,26 @@ function locateInTimeline(event) {
 
 /* ---------- 音乐时光胶囊 ---------- */
 const capsule = { mode: 'today', lastRandom: null, todayPick: null }
+function setLinkLabel(btn, text) {
+  if (!btn) return
+  const label = btn.querySelector('.text-link-label')
+  if (label) label.textContent = text
+  else btn.textContent = text
+}
+function setCapsuleLine(parts) {
+  const line = $('heroCapsuleLine')
+  if (!line) return
+  line.replaceChildren()
+  for (const part of parts) {
+    if (typeof part === 'string') line.append(part)
+    else {
+      const el = document.createElement(part.tag || 'span')
+      if (part.className) el.className = part.className
+      el.textContent = part.text
+      line.append(el)
+    }
+  }
+}
 function renderHeroCapsule() {
   const box = $('heroCapsule')
   if (!box) return
@@ -943,29 +1021,29 @@ function renderHeroCapsule() {
   box.hidden = !ready
   if (!ready) return
   const result = capsuleToday ? capsuleToday(state.all) : { kind: 'empty', songs: [], nearest: null }
-  const line = $('heroCapsuleLine')
   const todayBtn = $('heroTravelToday')
   capsule.todayPick = null
   if (result.kind === 'today' && result.songs.length) {
     const n = result.songs.length
     const first = result.songs[0].event
-    line.textContent = n === 1 ? `历史上的今天，你遇见了《${first.name}》` : `历史上的今天，往年遇见过 ${n} 首`
+    if (n === 1) setCapsuleLine(['历史上的今天，你遇见了《', { className: 'hero-capsule-mark', text: first.name }, '》'])
+    else setCapsuleLine(['历史上的今天，往年遇见过 ', { className: 'hero-capsule-date', text: String(n) }, ' 首'])
     if (todayBtn) {
       todayBtn.hidden = false
-      todayBtn.textContent = '历史上的今天'
+      setLinkLabel(todayBtn, '历史上的今天')
       todayBtn.title = '回到过去某年的同一天'
     }
     capsule.todayPick = first
   } else if (result.nearest?.songs?.length) {
-    line.textContent = `往年的今天还是空白。最靠近的是 ${result.nearest.m} 月 ${result.nearest.d} 日`
+    setCapsuleLine(['往年的今天还是空白。最靠近的是 ', { className: 'hero-capsule-date', text: `${result.nearest.m}月${result.nearest.d}日` }])
     if (todayBtn) {
       todayBtn.hidden = false
-      todayBtn.textContent = '去那年的今天'
+      setLinkLabel(todayBtn, '去那年的今天')
       todayBtn.title = '去往年里最靠近今天的那一天'
     }
     capsule.todayPick = result.nearest.songs[0].event
   } else {
-    line.textContent = '往年的今天，还没有记下初听'
+    setCapsuleLine(['往年的今天，还没有记下初听'])
     if (todayBtn) todayBtn.hidden = true
   }
   preloadTravelLibrary()
@@ -2102,7 +2180,9 @@ async function nativeShare() {
   await copyShareText()
 }
 async function openShare() {
-  const payload = sharePayload({ events: state.all })
+  const top = artistRanks(state.all)[0]
+  const portrait = top?.[0] ? await fetchArtistPortrait(top[0]) : ''
+  const payload = sharePayload({ events: state.all }, { portrait })
   if (!payload) return
   const job = ++shareJob
   shareState.text = payload.text

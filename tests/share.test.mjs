@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { insights } from '../web/insights.js'
-import { canSharePoster, renderPoster, sharePayload, shareMethod, shareData } from '../web/share.js'
+import { canSharePoster, renderPoster, sharePayload, shareMethod, shareData, coverKey, wallGrid } from '../web/share.js'
 
 const SECRET = {
   uid: '918273645501',
@@ -40,25 +40,14 @@ function keys(value, found = []) {
   return found
 }
 function assertWall(poster) {
-  assert.equal(poster.wall.length, 66)
+  assert.ok(poster.wall.length >= 1)
+  assert.ok(poster.wall.length <= 66)
   assert.equal(poster.wall.filter(slot => slot.first).length, 1)
   assert.equal(poster.wall[0].first, true)
-  assert.equal(poster.wall[0].cover, poster.first.cover)
-  const covers = [...new Set(poster.wall.map(slot => slot.cover).filter(Boolean))]
-  if (covers.length) assert.ok(poster.wall.slice(1).every(slot => slot.cover), 'blank tiles are filled when any cover exists')
-  const cols = 6
-  for (let i = 0; i < poster.wall.length; i++) {
-    const cover = poster.wall[i].cover
-    if (!cover) continue
-    const others = covers.filter(item => item !== cover)
-    if (!others.length) continue
-    const nextTo = []
-    if (i % cols) nextTo.push(poster.wall[i - 1].cover)
-    if (i % cols !== cols - 1 && i + 1 < poster.wall.length) nextTo.push(poster.wall[i + 1].cover)
-    if (i >= cols) nextTo.push(poster.wall[i - cols].cover)
-    if (i + cols < poster.wall.length) nextTo.push(poster.wall[i + cols].cover)
-    for (const other of nextTo) assert.notEqual(other, cover, `adjacent duplicate at ${i}`)
-  }
+  if (poster.first.cover) assert.equal(coverKey(poster.wall[0].cover), coverKey(poster.first.cover))
+  const keys = poster.wall.map(slot => slot.cover).filter(Boolean).map(coverKey)
+  assert.equal(new Set(keys).size, keys.length, 'duplicate cover on the wall')
+  assert.ok(Number.isInteger(poster.wallCols) && poster.wallCols >= 1 && poster.wallCols <= 6)
 }
 
 function assertPrivate(payload) {
@@ -144,8 +133,44 @@ test('the album wall skips blank sleeves and does not tile the same cover next t
     { song_id: '5', name: '戊', artists: '戊', date: '2024-01-05', time: '14:00', play_count: 1, cover: 'javascript:alert(1)' },
   ] })
   assertWall(payload.poster)
-  const covers = new Set(payload.poster.wall.map(slot => slot.cover))
-  assert.deepEqual([...covers].sort(), ['https://p1.music.126.net/ok/a.jpg', 'https://p2.music.126.net/ok/b.jpg'])
+  const covers = payload.poster.wall.map(slot => slot.cover).filter(Boolean)
+  assert.deepEqual([...new Set(covers)].sort(), ['https://p1.music.126.net/ok/a.jpg', 'https://p2.music.126.net/ok/b.jpg'])
+  assert.equal(covers.length, 2)
+})
+
+test('coverKey treats CDN mirrors and size variants as one image', () => {
+  const a = 'https://p1.music.126.net/abc/109951.jpg'
+  const b = 'http://p2.music.126.net/abc/109951.jpg?param=140y140'
+  const c = 'https://p3.music.126.net/abc/109951_140x140.jpg'
+  assert.equal(coverKey(a), coverKey(b))
+  assert.equal(coverKey(a), coverKey(c))
+  assert.deepEqual(wallGrid(50), { cols: 5, rows: 10 })
+})
+
+test('the album wall dedupes by album id and does not repeat covers to fill the grid', () => {
+  const payload = sharePayload({ events: [
+    { song_id: '1', name: '甲', artists: '甲', album: '同专', album_id: '88', date: '2024-01-01', time: '10:00', cover: 'https://p1.music.126.net/ok/a.jpg' },
+    { song_id: '2', name: '乙', artists: '甲', album: '同专', album_id: '88', date: '2024-01-02', time: '11:00', cover: 'https://p2.music.126.net/ok/a.jpg?param=500y500' },
+    { song_id: '3', name: '丙', artists: '丙', album: '另一张', album_id: '99', date: '2024-01-03', time: '12:00', cover: 'https://p1.music.126.net/ok/b.jpg' },
+    { song_id: '4', name: '丁', artists: '丁', album: '第三张', date: '2024-01-04', time: '13:00', cover: 'https://p1.music.126.net/ok/c_180y180.jpg' },
+    { song_id: '5', name: '戊', artists: '丁', album: '第三张', date: '2024-01-05', time: '14:00', cover: 'https://p4.music.126.net/ok/c.jpg' },
+  ] })
+  const covers = payload.poster.wall.map(slot => slot.cover)
+  assert.equal(covers.length, 3)
+  assert.equal(new Set(covers.map(coverKey)).size, 3)
+  assertWall(payload.poster)
+})
+
+test('a supplied artist portrait is kept on the most-met stub and the album cover remains as fallback', () => {
+  const payload = sharePayload({ events: [
+    { song_id: '1', name: '甲', artists: '周杰伦', date: '2024-01-01', time: '10:00', play_count: 1, cover: 'https://p1.music.126.net/ok/a.jpg' },
+    { song_id: '2', name: '乙', artists: '周杰伦', date: '2024-01-02', time: '11:00', play_count: 1, cover: 'https://p1.music.126.net/ok/b.jpg' },
+    { song_id: '3', name: '丙', artists: '周杰伦', date: '2024-01-03', time: '12:00', play_count: 1, cover: 'https://p1.music.126.net/ok/c.jpg' },
+  ] }, { portrait: 'https://p1.music.126.net/ok/face.jpg?param=200y200' })
+  assert.equal(payload.poster.mostMet.title, '周杰伦')
+  assert.equal(payload.poster.mostMet.portrait, 'https://p1.music.126.net/ok/face.jpg')
+  assert.equal(payload.poster.mostMet.cover, 'https://p1.music.126.net/ok/c.jpg')
+  assert.equal(payload.poster.mostMet.face, undefined)
 })
 
 test('one song, a missing album, and a missing cover still make a poster', () => {

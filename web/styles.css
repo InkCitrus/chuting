@@ -195,19 +195,25 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
   font-size: clamp(16px, 1.45vw, 19px);
   font-weight: 600;
   letter-spacing: 0;
-  align-items: baseline;
+  align-items: center;
+  gap: .42em;
+  padding: 6px 0;
+  min-height: 36px;
 }
-.text-link.serif::after {
-  content: "→";
-  font-family: var(--sans);
-  font-weight: 400;
-  font-size: .78em;
-  line-height: 1;
-  opacity: .4;
-  transform: translateY(-0.08em);
-  transition: transform .3s var(--ease), opacity .3s var(--ease);
+.text-link.serif::after { content: none }
+.text-link-label { display: inline-block }
+.text-link-arrow {
+  width: .78em;
+  height: .78em;
+  opacity: .42;
+  translate: 0 0;
+  transition: translate .45s cubic-bezier(.16, 1, .3, 1), opacity .3s ease;
 }
-.text-link.serif:hover::after { opacity: 1; transform: translateY(-0.08em) translateX(3px) }
+.text-link.serif:hover .text-link-arrow,
+.text-link.serif:focus-visible .text-link-arrow {
+  opacity: 1;
+  translate: 5px 0;
+}
 .icon-button { height: 36px; width: 36px; border: 1px solid var(--line); border-radius: 50%; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; color: var(--ink-2); transition: border-color .2s, color .2s, transform .3s var(--spring), background-color .2s; flex-shrink: 0 }
 .icon-button:hover:not(:disabled) { border-color: var(--ink); color: var(--ink); transform: scale(1.06) }
 .gear { font-size: 17px }
@@ -323,7 +329,10 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .hl-slide.is-active { opacity: 1; pointer-events: auto }
 .hl-open { width: 100%; height: 100%; border: 0; padding: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; gap: 26px; border-radius: 22px }
 .hl-art { position: relative; display: block; width: 100%; height: 300px; flex-shrink: 0; transform: perspective(1000px) rotateX(calc(var(--ty) * -8deg)) rotateY(calc(var(--tx) * 10deg)); transition: transform .6s var(--ease) }
-.hl-sleeve, .hl-mosaic { position: absolute; left: 0; top: 0; width: 300px; height: 300px; border-radius: 14px; box-shadow: 0 30px 60px -28px rgb(20 14 8 / .55), 0 0 0 1px rgb(0 0 0 / .04) }
+.hl-sleeve, .hl-mosaic, .hl-portrait { position: absolute; left: 0; top: 0; width: 300px; height: 300px; border-radius: 14px; box-shadow: 0 30px 60px -28px rgb(20 14 8 / .55), 0 0 0 1px rgb(0 0 0 / .04) }
+.hl-portrait { overflow: hidden; display: grid; place-items: center }
+.hl-portrait .cover-img, .hl-portrait-glyph { width: 100%; height: 100%; object-fit: cover }
+.hl-portrait-glyph { display: grid; place-items: center; font-family: var(--serif); font-weight: 900; font-size: 120px; color: rgb(255 255 255 / .9) }
 .hl-sleeve { z-index: 1 }
 .hl-sleeve .glyph { font-size: 120px }
 .hl-disc { position: absolute; left: 14px; top: 14px; width: 272px; height: 272px; border-radius: 50%; background: radial-gradient(circle, transparent 0 30%, #100e0d 30.5% 32%, transparent 32.5%), repeating-radial-gradient(circle, #151311 0 2.5px, #26221f 3px 3.5px), #151311; box-shadow: 0 26px 50px -24px rgb(0 0 0 / .6), inset 0 0 0 5px #0d0b0a; transform: translateX(0); transition: transform 1s var(--ease) .15s }
@@ -649,7 +658,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hl-stage { height: 150px }
   .hl-open { flex-direction: row; align-items: center; gap: 18px }
   .hl-art { width: 150px; height: 150px; transform: none }
-  .hl-sleeve, .hl-mosaic { width: 132px; height: 132px; top: 9px; border-radius: 10px }
+  .hl-sleeve, .hl-mosaic, .hl-portrait { width: 132px; height: 132px; top: 9px; border-radius: 10px }
+  .hl-portrait-glyph { font-size: 52px }
   .hl-sleeve .glyph { font-size: 52px }
   .hl-cell .glyph { font-size: 24px }
   .hl-disc { width: 120px; height: 120px; left: 6px; top: 15px }
@@ -695,14 +705,16 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hero-actions { margin-top: 26px; gap: 18px }
   .hero:has(#heroCapsule:not([hidden])) { padding: 6vh 0 32px; gap: 28px }
   .hero:has(#heroCapsule:not([hidden])) .highlights { margin-top: 0 }
-  .hero-capsule { margin-top: 20px; padding-top: 16px; max-width: none }
-  .hero-capsule-line { font-size: 16px }
+  .hero-capsule { margin-top: 22px; padding-top: 18px; max-width: none }
+  .hero-capsule-line { font-size: 16px; margin-bottom: 12px }
+  .hero-capsule-actions { column-gap: 1.75em }
   .sync-line { margin-top: 32px; font-size: 13.5px }
   .highlights { padding: 14px; border-radius: 20px }
   .hl-stage { height: 128px }
   .hl-open { gap: 14px }
   .hl-art { width: 118px; height: 118px }
-  .hl-sleeve, .hl-mosaic { width: 104px; height: 104px; top: 7px }
+  .hl-sleeve, .hl-mosaic, .hl-portrait { width: 104px; height: 104px; top: 7px }
+  .hl-portrait-glyph { font-size: 42px }
   .hl-disc { width: 94px; height: 94px; left: 5px; top: 12px }
   .hl-slide.is-active .hl-disc { transform: translateX(20px) }
   .hl-kicker { font-size: 11.5px; letter-spacing: .14em }
@@ -761,13 +773,15 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
     flex-shrink: 0;
   }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-sleeve,
-  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-mosaic {
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-mosaic,
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-portrait {
     width: 200px;
     height: 200px;
     top: 0;
     left: 0;
     border-radius: 12px;
   }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-portrait-glyph { font-size: 84px }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-sleeve .glyph { font-size: 84px }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-disc {
     width: 180px;
@@ -827,8 +841,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
     padding-top: 14px;
     max-width: none;
   }
-  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule-kicker { margin-bottom: 4px }
-  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule-line { font-size: 15px; margin-bottom: 4px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule-kicker { margin-bottom: 6px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule-line { font-size: 16px; margin-bottom: 8px }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-actions {
     order: 5;
     margin-top: 0;
@@ -1229,13 +1243,45 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 }
 
 /* 首页英雄上的时光胶囊入口：一条细线隔开正文，不和右侧唱片抢视线 */
-.hero-capsule { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); max-width: 34em }
+.hero-capsule { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); max-width: 36em }
 .hero-capsule[hidden] { display: none }
-.hero-capsule-kicker { margin: 0 0 8px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; color: var(--accent) }
-.hero-capsule-line { margin: 0 0 14px; font-family: var(--serif); font-size: clamp(17px, 1.55vw, 20px); line-height: 1.5; color: var(--ink) }
-.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 28px }
+.hero-capsule-kicker {
+  margin: 0 0 10px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  color: var(--accent);
+}
+.hero-capsule-line {
+  margin: 0 0 16px;
+  font-family: var(--serif);
+  font-size: clamp(17px, 1.55vw, 21px);
+  line-height: 1.55;
+  color: var(--ink);
+  text-wrap: pretty;
+  font-kerning: normal;
+  font-feature-settings: "palt" 1, "kern" 1;
+}
+.hero-capsule-date {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1, "palt" 1;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+.hero-capsule-mark { font-weight: 700 }
+.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; column-gap: 2.25em; row-gap: 2px }
 @media (prefers-reduced-motion: no-preference) {
-  .hero-capsule { animation: rise-in var(--d-4) var(--ease) both; animation-delay: calc(var(--stagger) * 12) }
+  .hero-capsule { animation: none }
+  .hero-capsule-kicker,
+  .hero-capsule-line,
+  .hero-capsule-actions .text-link {
+    animation: rise-in var(--d-4) cubic-bezier(.16, 1, .3, 1) both;
+  }
+  .hero-capsule-kicker { animation-delay: calc(var(--stagger) * 12) }
+  .hero-capsule-line { animation-delay: calc(var(--stagger) * 13.5) }
+  .hero-capsule-actions .text-link:nth-child(1) { animation-delay: calc(var(--stagger) * 15) }
+  .hero-capsule-actions .text-link:nth-child(2) { animation-delay: calc(var(--stagger) * 16.5) }
 }
 
 /* 胶囊面板：顶上一溜封面，像从胶片里抽出来 */
