@@ -865,3 +865,49 @@ dialog::backdrop { background: rgb(14 11 8 / .46); backdrop-filter: none; -webki
 .mini-player.is-playing .mini-play .i-pause { display: block }
 body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 @media (max-width: 700px) { .player { grid-template-columns: auto minmax(0, 1fr); gap: 12px } }
+
+/* 定位：在时间线里轻轻圈出正在听的那一首，只用描边和缩放 */
+.song.is-locate {
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+.song.is-locate .song-cover { outline: 1.5px solid var(--accent); outline-offset: 2px }
+@media (prefers-reduced-motion: no-preference) {
+  .song.is-locate { animation: locate-row .9s var(--ease) }
+  .song.is-locate .song-cover { animation: locate-cover .8s var(--spring-soft) }
+}
+@keyframes locate-row { from { opacity: .55; transform: translateX(-6px) } to { opacity: 1; transform: none } }
+@keyframes locate-cover { from { transform: scale(.86); opacity: .6 } }
+
+.detail-links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.capsule-launch { flex-shrink: 0 }
+
+/* 时光胶囊 */
+#capsuleDialog { width: min(520px, calc(100vw - 32px)); padding: 30px 28px 32px }
+.capsule-modes { display: flex; gap: 0; margin: 18px 0 22px; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--glass) }
+.capsule-modes button { flex: 1; border: 0; background: transparent; border-radius: 999px; padding: 8px 14px; font-size: 13.5px; color: var(--muted); transition: color var(--d-2), background-color var(--d-3) var(--ease), transform var(--d-3) var(--spring) }
+.capsule-modes button[aria-selected="true"] { background: var(--ink); color: var(--bg) }
+.capsule-body { display: flex; flex-direction: column; gap: 16px }
+.capsule-lede { font-family: var(--serif); font-size: 18px; line-height: 1.7; margin: 0; color: var(--ink) }
+.capsule-hint { margin: 0; font-size: 13.5px; color: var(--muted) }
+.capsule-list { display: flex; flex-direction: column; gap: 8px }
+.capsule-song, .capsule-featured { display: flex; align-items: center; gap: 14px; width: 100%; border: 1px solid var(--line); background: var(--bg); color: var(--ink); text-align: left; border-radius: 16px; padding: 10px 14px 10px 10px; transition: transform var(--d-3) var(--spring), border-color var(--d-2), background-color var(--d-2) }
+.capsule-song:hover, .capsule-featured:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); transform: translateY(-1px) }
+.capsule-cover { width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0; box-shadow: 0 0 0 1px rgb(0 0 0 / .05), 0 8px 16px -10px rgb(20 14 8 / .45) }
+.capsule-cover.is-lg { width: 96px; height: 96px; border-radius: 14px }
+.capsule-song-text, .capsule-featured-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.capsule-song-text b, .capsule-featured-text b { font-family: var(--serif); font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.capsule-song-text small, .capsule-featured-text small { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.capsule-ago { font-style: normal; font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .04em; white-space: nowrap; flex-shrink: 0 }
+.capsule-featured { padding: 14px; border-color: color-mix(in srgb, var(--accent) 22%, var(--line)) }
+.capsule-kicker { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .04em }
+@media (prefers-reduced-motion: no-preference) {
+  #capsuleDialog[open]:not(.is-closing) .capsule-lede,
+  #capsuleDialog[open]:not(.is-closing) .capsule-hint,
+  #capsuleDialog[open]:not(.is-closing) .capsule-song,
+  #capsuleDialog[open]:not(.is-closing) .capsule-featured,
+  #capsuleDialog[open]:not(.is-closing) .capsule-body > .button {
+    animation: rise-in var(--d-3) var(--ease) both;
+    animation-delay: calc(var(--i, 0) * var(--stagger) + 40ms);
+  }
+}

@@ -25,6 +25,7 @@
   <link rel="modulepreload" href="/rotator.js">
   <link rel="modulepreload" href="/copy.js">
   <link rel="modulepreload" href="/player.js">
+  <link rel="modulepreload" href="/capsule.js">
   <script src="/app.js" type="module"></script>
 </head>
 <body>
@@ -104,6 +105,7 @@
             <button type="button" id="orderNewest" aria-pressed="true">最新在前</button>
             <button type="button" id="orderOldest" aria-pressed="false">从头讲起</button>
           </div>
+          <button type="button" class="button ghost capsule-launch" id="capsuleButton" hidden>时光胶囊</button>
         </div>
       </div>
       <div class="timeline-body">
@@ -125,6 +127,7 @@
 
   <div class="mini-player" id="miniPlayer" hidden>
     <button type="button" class="mini-open" id="miniOpen" aria-label="打开正在播放的歌"><span class="mini-cover" id="miniCover" aria-hidden="true"></span><span class="mini-text"><b id="miniTitle"></b><small id="miniArtist"></small></span></button>
+    <button type="button" class="icon-button" id="miniLocate" aria-label="在时间线中查看这首歌"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v2.4M8 12v2.4M1.6 8h2.4M12 8h2.4"/></svg></button>
     <button type="button" class="icon-button mini-play" id="miniPlay" aria-label="暂停"><svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8z"/></svg><svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9"/></svg></button>
     <button type="button" class="icon-button" id="miniClose" aria-label="停止播放"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
   </div>
@@ -199,12 +202,26 @@
     </div>
     <dl id="detailFacts"></dl>
     <div class="detail-actions">
-      <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+      <div class="detail-links">
+        <button type="button" class="button ghost" id="locateBtn">在时间线中查看</button>
+        <a class="button ghost" id="songLink" target="_blank" rel="noreferrer">在网易云音乐中打开<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4h6v6M12 4l-7 7"/></svg></a>
+      </div>
       <span class="detail-nav">
         <button type="button" class="icon-button" id="prevSong" aria-label="上一首"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5"/></svg></button>
         <button type="button" class="icon-button" id="nextSong" aria-label="下一首"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
       </span>
     </div>
+  </dialog>
+
+  <dialog id="capsuleDialog" class="capsule-sheet" aria-labelledby="capsuleTitle">
+    <button type="button" class="dialog-close icon-button" id="closeCapsule" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    <p class="kicker">音乐时光胶囊</p>
+    <h2 id="capsuleTitle">回到某一次初听</h2>
+    <div class="capsule-modes" role="tablist" aria-label="胶囊方式">
+      <button type="button" id="capsuleTodayBtn" role="tab" aria-selected="true">历史上的今天</button>
+      <button type="button" id="capsuleRandomBtn" role="tab" aria-selected="false">随机回到过去</button>
+    </div>
+    <div id="capsuleBody" class="capsule-body"></div>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

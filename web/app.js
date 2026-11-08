@@ -21,15 +21,20 @@ const softRotate = (el, pool) => { if (el) el.textContent = plain((pool && pool[
 const softClear = (el, text) => { if (el) el.textContent = text || '' }
 const softPlayer = () => ({ show() {}, play() {}, get current() { return null }, get playing() { return false }, setActions() {}, setOffline() {}, render() {} })
 
-const [copyMod, rotMod, playerMod] = await Promise.all([
+const [copyMod, rotMod, playerMod, capsuleMod] = await Promise.all([
   import('./copy.js').catch(() => null),
   import('./rotator.js').catch(() => null),
-  import('./player.js').catch(() => null)
+  import('./player.js').catch(() => null),
+  import('./capsule.js').catch(() => null)
 ])
 const { taglines, timelineLedes, endTitles, WELCOME_LINES, SYNCING_LINES, LOADING_LINES, INTRO_TITLES, CLOSING_LINES, SYNCING_EMPTY } = copyMod || fallbackCopy
 const rotate = rotMod?.rotate || softRotate
 const clearCopy = rotMod?.clearCopy || softClear
 const createPlayer = playerMod?.createPlayer || softPlayer
+const capsuleToday = capsuleMod?.capsuleToday
+const yearsAgoLabel = capsuleMod?.yearsAgoLabel || (n => n === 1 ? '去年' : `${n} 年前`)
+const capsuleNeighbors = capsuleMod?.neighbors || (() => [])
+const capsuleRandom = capsuleMod?.randomMoment || (events => events[0] || null)
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -572,6 +577,7 @@ function renderTimeline(options = {}) {
   $('timelineTitle').textContent = search ? `搜索「${search}」` : '时间线'
   $('timelineMeta').textContent = state.loading ? '' : search ? `找到 ${n(state.view.length)} 首` : state.view.length ? `${n(state.chapters.length)} 个月 · ${n(state.view.length)} 首初听` : ''
   $('timelineTools').hidden = !state.loading && !search && !state.all.length
+  if ($('capsuleButton')) $('capsuleButton').hidden = !state.all.length
   const lede = $('timelineLede')
   lede.hidden = state.loading || Boolean(search) || !state.all.length
   if (!lede.hidden) rotate(lede, timelineLedes(state.all, state.order), { interval: 11000, delay: 5200 })
@@ -805,7 +811,7 @@ function showSong(event, source) {
   if (!event) return
   const dialog = $('songDialog')
   if (modalLayer.transition) { fillSong(event); if (!dialog.open) openModal(dialog); return }
-  const from = source?.querySelector('.song-cover, .hl-sleeve, .hl-mosaic')
+  const from = source?.querySelector?.('.song-cover, .hl-sleeve, .hl-mosaic, .capsule-cover') || (source?.classList?.contains('capsule-cover') ? source : null)
   // Same-document View Transition: the row's cover morphs into the dialog artwork.
   if (motion && from && document.startViewTransition && !dialog.open) {
     from.style.viewTransitionName = 'song-art'
@@ -833,6 +839,144 @@ function stepSong(delta) {
   const art = $('detailArt')
   if (motion) { art.classList.remove('swap'); void art.offsetWidth; art.classList.add('swap') }
   fillSong(next, true) // if a song is playing, the next one follows
+}
+
+/* ---------- 时间线定位 ---------- */
+function locateInTimeline(event) {
+  if (!event) return
+  const song = state.all.find(e => e.song_id === event.song_id)
+  if (!song) { toast('这首歌不在当前时间线里'); return }
+  const go = () => {
+    if (state.query && !state.view.some(e => e.song_id === song.song_id)) clearSearch()
+    const key = song.date.slice(0, 7)
+    if (!$(`m-${key}`)) renderMore(key)
+    const el = $('timeline').querySelector(`.song[data-song="${song.song_id}"]`)
+    if (!el) { toast('没能在时间线里找到这首'); return }
+    el.closest('.chapter')?.querySelectorAll('.reveal').forEach(node => node.classList.add('shown'))
+    $('timeline').querySelectorAll('.song.is-locate').forEach(node => node.classList.remove('is-locate'))
+    el.classList.add('is-locate')
+    el.scrollIntoView({ behavior: motion ? 'smooth' : 'auto', block: 'center' })
+    try { el.focus({ preventScroll: true }) } catch {}
+    const settle = (tries = 0) => requestAnimationFrame(() => {
+      const r = el.getBoundingClientRect(), mid = innerHeight / 2
+      const off = r.top + r.height / 2 - mid
+      if (Math.abs(off) > 8 && tries < 8) { scrollBy(0, off); settle(tries + 1) }
+    })
+    if (motion) setTimeout(() => settle(), 280)
+    const clear = () => el.classList.remove('is-locate')
+    el.addEventListener('animationend', clear, { once: true })
+    setTimeout(clear, 2400)
+  }
+  const open = ['songDialog', 'capsuleDialog'].map($).filter(d => d?.open)
+  if (open.length) {
+    for (const d of open) closeDialog(d)
+    setTimeout(go, motion ? 260 : 0)
+  } else go()
+}
+
+/* ---------- 音乐时光胶囊 ---------- */
+const capsule = { mode: 'today', lastRandom: null }
+function openCapsule(mode = 'today') {
+  if (!state.all.length) { toast('还没有可以回顾的初听'); return }
+  capsule.mode = mode === 'random' ? 'random' : 'today'
+  renderCapsule()
+  openModal($('capsuleDialog'))
+}
+function renderCapsule() {
+  const todayBtn = $('capsuleTodayBtn'), randomBtn = $('capsuleRandomBtn'), body = $('capsuleBody')
+  if (!todayBtn || !body || !capsuleToday) return
+  const isToday = capsule.mode === 'today'
+  todayBtn.setAttribute('aria-selected', String(isToday))
+  randomBtn.setAttribute('aria-selected', String(!isToday))
+  body.replaceChildren()
+  if (isToday) renderCapsuleToday(body)
+  else renderCapsuleRandom(body)
+}
+function capsuleSongButton(entry, extraClass = '') {
+  const event = entry.event || entry
+  const button = node('button', `capsule-song ${extraClass}`.trim())
+  button.type = 'button'
+  button.dataset.song = String(event.song_id)
+  const cover = tile(event, 'capsule-cover', 96, true)
+  cover.setAttribute('aria-hidden', 'true')
+  const text = node('span', 'capsule-song-text')
+  text.append(node('b', '', event.name), node('small', '', event.artists || '歌手未知'))
+  button.append(cover, text)
+  if (entry.yearsAgo) button.append(node('em', 'capsule-ago', yearsAgoLabel(entry.yearsAgo)))
+  button.addEventListener('click', () => {
+    closeDialog($('capsuleDialog'))
+    setTimeout(() => showSong(event, button), motion ? 220 : 0)
+  })
+  return button
+}
+function renderCapsuleToday(body) {
+  const result = capsuleToday(state.all)
+  const heading = node('p', 'capsule-lede')
+  if (result.kind === 'today') {
+    heading.textContent = `往年的今天，你遇见过 ${result.songs.length} 首。`
+    body.append(heading)
+    const list = node('div', 'capsule-list')
+    result.songs.forEach((entry, i) => {
+      const row = capsuleSongButton(entry)
+      row.style.setProperty('--i', i)
+      list.append(row)
+    })
+    body.append(list)
+    return
+  }
+  heading.textContent = '往年的今天，还没有记下初听。'
+  body.append(heading)
+  if (result.nearest?.songs?.length) {
+    const near = node('p', 'capsule-hint', `最靠近的是 ${result.nearest.m} 月 ${result.nearest.d} 日`)
+    body.append(near)
+    const list = node('div', 'capsule-list')
+    result.nearest.songs.slice(0, 6).forEach((entry, i) => {
+      const row = capsuleSongButton(entry)
+      row.style.setProperty('--i', i)
+      list.append(row)
+    })
+    body.append(list)
+  } else {
+    body.append(node('p', 'capsule-hint', '档案里还没有能对照的日子。'))
+  }
+  const retry = node('button', 'button ghost', '随机回到过去')
+  retry.type = 'button'
+  retry.addEventListener('click', () => { capsule.mode = 'random'; renderCapsule() })
+  body.append(retry)
+}
+function renderCapsuleRandom(body) {
+  const event = capsuleRandom(state.all, Math.random, capsule.lastRandom)
+  if (!event) { body.append(node('p', 'capsule-lede', '还没有可以回顾的初听。')); return }
+  capsule.lastRandom = event.song_id
+  const when = `${dayLabel(event.date, true)} ${event.time}`
+  const featured = node('button', 'capsule-featured')
+  featured.type = 'button'
+  const cover = tile(event, 'capsule-cover is-lg', 240, true)
+  cover.setAttribute('aria-hidden', 'true')
+  const text = node('span', 'capsule-featured-text')
+  text.append(node('span', 'capsule-kicker', when), node('b', '', event.name), node('small', '', event.artists || '歌手未知'))
+  featured.append(cover, text)
+  featured.addEventListener('click', () => {
+    closeDialog($('capsuleDialog'))
+    setTimeout(() => showSong(event, featured), motion ? 220 : 0)
+  })
+  featured.style.setProperty('--i', 0)
+  body.append(featured)
+  const around = capsuleNeighbors(state.all, event, { days: 3, limit: 4 })
+  if (around.length) {
+    body.append(node('p', 'capsule-hint', '那时前后，你还初听了'))
+    const list = node('div', 'capsule-list')
+    around.forEach((item, i) => {
+      const row = capsuleSongButton(item)
+      row.style.setProperty('--i', i + 1)
+      list.append(row)
+    })
+    body.append(list)
+  }
+  const again = node('button', 'button ghost', '再随机一次')
+  again.type = 'button'
+  again.addEventListener('click', () => renderCapsule())
+  body.append(again)
 }
 
 /* ---------- 弹窗 ---------- */
@@ -874,7 +1018,7 @@ function closeDialog(dialog, { fromPop = false } = {}) {
   dialog.classList.add('is-closing')
   setTimeout(() => { dialog.classList.remove('is-closing'); dialog.close(); afterClose() }, 200)
 }
-for (const id of ['settingsDialog', 'songDialog', 'loginDialog']) {
+for (const id of ['settingsDialog', 'songDialog', 'loginDialog', 'capsuleDialog']) {
   const d = $(id)
   d.addEventListener('cancel', e => { e.preventDefault(); closeDialog(d) })
   d.addEventListener('close', () => { tick(); player?.render(); syncSettingsExpanded() })
@@ -1209,6 +1353,12 @@ $('settingsButton').addEventListener('click', () => { renderSettings(); openModa
 $('closeSettings').addEventListener('click', () => closeDialog($('settingsDialog')))
 $('closeSong').addEventListener('click', () => closeDialog($('songDialog')))
 $('closeLogin').addEventListener('click', () => closeDialog($('loginDialog')))
+$('closeCapsule')?.addEventListener('click', () => closeDialog($('capsuleDialog')))
+$('capsuleButton')?.addEventListener('click', () => openCapsule('today'))
+$('capsuleTodayBtn')?.addEventListener('click', () => { capsule.mode = 'today'; renderCapsule() })
+$('capsuleRandomBtn')?.addEventListener('click', () => { capsule.mode = 'random'; renderCapsule() })
+$('locateBtn')?.addEventListener('click', () => locateInTimeline(state.view[state.current] || player?.current))
+$('miniLocate')?.addEventListener('click', () => locateInTimeline(player?.current))
 $('prevSong').addEventListener('click', () => stepSong(-1))
 $('nextSong').addEventListener('click', () => stepSong(1))
 $('songDialog').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') stepSong(-1); if (e.key === 'ArrowRight') stepSong(1) })
@@ -1283,7 +1433,7 @@ function playRelative(delta) {
 player = createPlayer({
   els: { root: $('player'), dialog: $('songDialog'), play: $('playBtn'), seek: $('seek'), scrub: $('scrub'), cur: $('curTime'), dur: $('durTime'), note: $('playerNote'), volume: finePointer ? $('volume') : null },
   mini: { root: $('miniPlayer'), play: $('miniPlay'), open: $('miniOpen'), close: $('miniClose'), title: $('miniTitle'), artist: $('miniArtist'), cover: $('miniCover') },
-  getUrl: event => remote('/api/netease', { method: 'song_url', query: { id: String(event.song_id) }, uid: state.account?.uid }),
+  getUrl: (event, query = {}) => remote('/api/netease', { method: 'song_url', query: { id: String(event.song_id), ...query }, uid: state.account?.uid }),
   coverFor: event => (event.cover ? px => coverSize(event.cover, px) : null),
   onEnded: () => playRelative(1),
   onOpen: event => showSong(state.view.find(x => x.song_id === event.song_id) || event)
