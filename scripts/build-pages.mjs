@@ -31,7 +31,7 @@ await writeFile(swPath, sw.replace("'__BUILD__'", `'${version}'`))
 // Append ?v=<stamp> to every module / stylesheet URL the page and its imports use, so a zone-level
 // cache that ignores _headers cannot mix an old app.js with a new rotator.js (or the reverse).
 const bust = `?v=${version}`
-const stampHtml = text => text.replace(/(href|src)="(\/(?:app|backend|browser-store|browser-sync|archive-core|insights|rotator|copy|player|theme|styles)\.[^"]+)"/g,
+const stampHtml = text => text.replace(/(href|src)="(\/(?:app|backend|browser-store|browser-sync|archive-core|insights|rotator|copy|player|capsule|travel|theme|styles)\.[^"]+)"/g,
   (_, attr, url) => `${attr}="${url.includes('?') ? url : url + bust}"`)
 const stampJs = text => text.replace(/(from\s+|import\s*\(\s*)(['"])(\.\/[^'"]+\.js)\2/g,
   (_, pre, q, url) => `${pre}${q}${url.includes('?') ? url : url + bust}${q}`)
