@@ -41,12 +41,15 @@ const TRAVEL_MS = travelMod?.TRAVEL_MS || 2600
 const TRAVEL_BACK_MS = travelMod?.TRAVEL_BACK_MS || 920
 const TRAVEL_REDUCED_MS = travelMod?.TRAVEL_REDUCED_MS || 340
 const easeOut = travelMod?.easeOut || (t => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3)
+const easeTravel = travelMod?.easeTravel || (t => { const x = Math.min(1, Math.max(0, t)); return x * x * x * (x * (x * 6 - 15) + 10) })
 const lerp = travelMod?.lerp || ((a, b, t) => a + (b - a) * t)
 const clockParts = travelMod?.clockParts || (ms => { const d = new Date(ms); return Number.isNaN(d.getTime()) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() } })
 const pickTravelCovers = travelMod?.pickTravelCovers || ((events, target, limit = 24) => (target ? [target] : []).concat(events || []).slice(0, limit))
 const fillTravelWall = travelMod?.fillTravelWall || (items => items || [])
-const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: 0, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0, scale: 1, blur: 0 }))
+const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 400, y: 0, z: -400 + t * 800, opacity: 1, rotate: 0, scale: 1, blur: 0, brightness: 1 }))
+const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 240
+const TRAVEL_WALL = travelMod?.TRAVEL_WALL || 10
 const backendReady = createBackend()
 const $ = id => document.getElementById(id)
 const SVG = 'http://www.w3.org/2000/svg'
@@ -1025,22 +1028,52 @@ function dismissCapsuleForTravel() {
     modalLayer.id = 'travelOverlay'
   }
 }
-function paintTravelClock(ms) {
+function rollClockDigit(el, value) {
+  if (!el) return
+  const text = String(value).padStart(2, '0')
+  if (el.dataset.value === text) return
+  const prev = el.dataset.value
+  el.dataset.value = text
+  if (!prev) { el.textContent = text; return }
+  el.replaceChildren()
+  const out = node('span', 'travel-roll-out', prev)
+  const inn = node('span', 'travel-roll-in', text)
+  el.append(out, inn)
+  const finish = () => { if (el.dataset.value === text) el.textContent = text }
+  inn.addEventListener('animationend', finish, { once: true })
+  setTimeout(finish, 180)
+}
+function paintTravelClock(ms, force = false) {
   const parts = clockParts(ms)
   if (!parts) return
   if ($('travelYear')) $('travelYear').textContent = String(parts.y)
-  if ($('travelMonth')) $('travelMonth').textContent = String(parts.m).padStart(2, '0')
-  if ($('travelDay')) $('travelDay').textContent = String(parts.d).padStart(2, '0')
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  if (!force && travel.clockAt && now - travel.clockAt < 72) return
+  travel.clockAt = now
+  rollClockDigit($('travelMonth'), parts.m)
+  rollClockDigit($('travelDay'), parts.d)
+}
+function applyCardPose(el, pose) {
+  if (!el) return
+  el.style.opacity = String(pose.opacity)
+  el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) scale(${pose.scale || 1})`
+  const filters = []
+  if (pose.brightness != null && pose.brightness < 0.995) filters.push(`brightness(${pose.brightness.toFixed(3)})`)
+  if (pose.blur) filters.push(`blur(${pose.blur.toFixed(2)}px)`)
+  el.style.filter = filters.join(' ')
+  el.style.zIndex = String(Math.round(1800 + pose.z))
+  el.hidden = pose.opacity <= 0.01
 }
 function poseTravelCards(t, reverse = false) {
   const cards = $('travelTunnel')?.children || []
   const n = cards.length
-  for (let i = 0; i < n; i++) {
-    const pose = cardPose(i, n, t, reverse)
-    const el = cards[i]
-    el.style.opacity = String(pose.opacity)
-    el.style.transform = `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px) rotateZ(${pose.rotate}deg) scale(${pose.scale || 1})`
-    el.style.filter = pose.blur ? `blur(${pose.blur}px)` : ''
+  for (let i = 0; i < n; i++) applyCardPose(cards[i], cardPose(i, n, t, reverse))
+  const hero = $('travelHero')
+  if (hero) applyCardPose(hero, heroPose(t, reverse))
+  const clock = $('travelClock')
+  if (clock) {
+    const fade = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.22)
+    clock.style.opacity = String(reverse ? Math.min(1, t * 1.4) : fade)
   }
 }
 const travelArts = new Map()
@@ -1106,27 +1139,38 @@ async function collectTunnelArts(target) {
     await Promise.race([settle, new Promise(r => setTimeout(r, 280))])
     ready = readyTravelArts(picked)
   }
-  return fillTravelWall(ready, 18)
+  return fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_WALL)
 }
-function makeTravelCard(art) {
-  const card = node('span', 'travel-card')
-  const streak = node('span', 'travel-card-streak')
-  streak.append(clonedArt(art.img))
-  card.append(streak, clonedArt(art.img, 'travel-card-art'))
+function makeTravelCard(art, extraClass = '') {
+  const card = node('span', extraClass ? `travel-card ${extraClass}` : 'travel-card')
+  card.append(clonedArt(art.img, 'travel-card-art'))
   return card
+}
+function paintTravelHero(target) {
+  const hero = $('travelHero')
+  if (!hero) return
+  hero.replaceChildren()
+  hero.hidden = true
+  const img = target?.cover && travelArts.get(target.cover)
+  if (img) {
+    hero.append(clonedArt(img, 'travel-card-art'))
+    applyCardPose(hero, heroPose(0))
+  }
 }
 function buildTravelTunnel(target, arts) {
   const tunnel = $('travelTunnel')
   if (!tunnel) return 0
   tunnel.replaceChildren()
-  const list = arts && arts.length ? arts : fillTravelWall(readyTravelArts(pickTravelCovers(state.all, target, 24)), 18)
+  const ready = arts && arts.length ? arts : readyTravelArts(pickTravelCovers(state.all, target, 24))
+  const walls = fillTravelWall(ready.filter(a => a.event?.song_id !== target?.song_id), TRAVEL_WALL)
+  const list = walls.length ? walls : fillTravelWall(ready, TRAVEL_WALL)
   if (!list.length) {
-    // Truly no decoded covers: fall back to letter tiles rather than an empty corridor.
-    for (const e of pickTravelCovers(state.all, target, 12)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
-    return tunnel.children.length
+    for (const e of pickTravelCovers(state.all, target, 8)) tunnel.append(tile(e, 'travel-card is-glyph', 160, true))
+  } else {
+    for (const art of list) tunnel.append(makeTravelCard(art))
   }
-  for (const art of list) tunnel.append(makeTravelCard(art))
-  return list.length
+  paintTravelHero(target)
+  return tunnel.children.length
 }
 function nearbyFirsts(event) {
   let near = capsuleNeighbors(state.all, event, { days: 3, limit: 4 })
@@ -1190,6 +1234,8 @@ function showArrival(event) {
   const overlay = $('travelOverlay')
   overlay?.classList.add('is-arrive')
   overlay?.classList.remove('is-going')
+  const leftover = $('travelHero')
+  if (leftover) { leftover.style.opacity = '0'; leftover.hidden = true }
   const box = $('travelArrive')
   if (box) box.hidden = false
   paintArriveBg(event)
@@ -1232,9 +1278,24 @@ function showArrival(event) {
 }
 function finishGoing() {
   travel.phase = 'arrive'
-  paintTravelClock(travel.toMs)
+  paintTravelClock(travel.toMs, true)
   poseTravelCards(1, false)
-  showArrival(travel.event)
+  const event = travel.event
+  const hero = $('travelHero')
+  const canMorph = motion && !reduced.matches && typeof document.startViewTransition === 'function'
+    && hero && !hero.hidden && event?.cover && hero.querySelector('img')
+  if (canMorph) {
+    hero.style.viewTransitionName = 'travel-hero'
+    const vt = document.startViewTransition(() => {
+      hero.style.viewTransitionName = ''
+      showArrival(event)
+      const art = $('arriveArt')
+      if (art) art.style.viewTransitionName = 'travel-hero'
+    })
+    vt.finished.finally(() => { const art = $('arriveArt'); if (art) art.style.viewTransitionName = '' })
+    return
+  }
+  showArrival(event)
 }
 function skipTravel() {
   if (travel.phase !== 'going' && travel.phase !== 'waiting') return
@@ -1244,16 +1305,20 @@ function skipTravel() {
 function beginTravelMotion(event, arts) {
   if (travel.event !== event || (travel.phase !== 'going' && travel.phase !== 'waiting')) return
   travel.phase = 'going'
+  travel.clockAt = 0
   buildTravelTunnel(event, arts)
+  if ($('travelClock')) $('travelClock').style.opacity = '1'
   poseTravelCards(0, false)
-  paintTravelClock(travel.fromMs)
+  paintTravelClock(travel.fromMs, true)
   cancelAnimationFrame(travel.raf)
   travel.start = performance.now()
   const tick = now => {
-    const raw = Math.min(1, (now - travel.start) / travel.duration)
-    const t = easeOut(raw)
+    const hold = Number(document.documentElement.dataset.travelHold)
+    const raw = Number.isFinite(hold) ? Math.min(1, Math.max(0, hold)) : Math.min(1, (now - travel.start) / travel.duration)
+    const t = easeTravel(raw)
     poseTravelCards(t, false)
-    paintTravelClock(lerp(travel.fromMs, travel.toMs, t))
+    paintTravelClock(lerp(travel.fromMs, travel.toMs, t), Number.isFinite(hold))
+    if (Number.isFinite(hold) && travel.phase === 'going') { travel.raf = requestAnimationFrame(tick); return }
     if (raw < 1 && travel.phase === 'going') travel.raf = requestAnimationFrame(tick)
     else if (travel.phase === 'going') finishGoing()
   }
@@ -1291,7 +1356,7 @@ function startTravel(event, { source = 'random' } = {}) {
   cancelAnimationFrame(travel.raf)
   if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
-  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)), 18)
+  const cached = fillTravelWall(readyTravelArts(pickTravelCovers(state.all, event, 24)).filter(a => a.event?.song_id !== event?.song_id), TRAVEL_WALL)
   if (cached.length) beginTravelMotion(event, cached)
   else collectTunnelArts(event).then(arts => {
     if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
@@ -1330,7 +1395,7 @@ function returnToPresent({ fromPop = false } = {}) {
     const from = travel.toMs, to = Date.now()
     const tick = now => {
       const raw = Math.min(1, (now - travel.start) / travel.duration)
-      const t = easeOut(raw)
+      const t = easeTravel(raw)
       poseTravelCards(t, true)
       paintTravelClock(lerp(from, to, t))
       if (raw < 1 && travel.phase === 'back') travel.raf = requestAnimationFrame(tick)

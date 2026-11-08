@@ -940,39 +940,56 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 }
 @keyframes travel-in { from { opacity: 0 } }
 
-/* 隧道：更宽的景深走廊，封面绕开中间的日期 */
-.travel-stage { position: absolute; inset: 0; perspective: 1100px; perspective-origin: 50% 46%; overflow: hidden }
+/* 隧道：两侧墙面的透视走廊，中间留给日期 */
+.travel-stage { position: absolute; inset: 0; perspective: 1000px; perspective-origin: 50% 46%; overflow: hidden }
 .travel-stage[hidden] { display: none }
+.travel-streaks { position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 1;
+  background: repeating-conic-gradient(from 8deg at 50% 46%, transparent 0 31deg, rgb(243 238 230 / .045) 31deg 31.28deg, transparent 31.28deg 60deg);
+  mask-image: radial-gradient(circle at 50% 46%, transparent 14%, #000 40%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 50% 46%, transparent 14%, #000 40%, transparent 70%) }
+.travel.is-going .travel-streaks { animation: streak-pulse 2.6s ease-in-out both }
+@keyframes streak-pulse { 0%, 18%, 100% { opacity: 0 } 42% { opacity: .7 } 58% { opacity: .35 } }
 .travel-tunnel { position: absolute; inset: 0; transform-style: preserve-3d; pointer-events: none }
-.travel-card { position: absolute; left: 50%; top: 50%; width: 176px; height: 176px; margin: -88px 0 0 -88px;
-  overflow: visible; background: transparent; will-change: transform, opacity, filter; transform-style: preserve-3d; backface-visibility: hidden }
-.travel-card-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 12px;
-  box-shadow: 0 24px 50px rgb(0 0 0 / .55); display: block }
-.travel-card-streak { position: absolute; inset: -6% 10% 10%; border-radius: 12px; overflow: hidden; z-index: -1;
-  filter: blur(16px) saturate(1.3); opacity: .42; transform: translate3d(0, 28px, -56px) scale(1.16); pointer-events: none }
-.travel-card-streak img { width: 100%; height: 100%; object-fit: cover; display: block }
-.travel-card.is-glyph { overflow: hidden; border-radius: 12px; background: #1a1816 }
-.travel-whoosh { position: absolute; left: 50%; top: 46%; width: 80vmax; height: 80vmax; margin: -40vmax 0 0 -40vmax; border-radius: 50%;
-  pointer-events: none; background: radial-gradient(circle, rgb(243 238 230 / .16), transparent 64%); opacity: 0 }
-.travel.is-going .travel-whoosh { animation: travel-whoosh 2.6s var(--ease) both }
-@keyframes travel-whoosh { 0% { transform: scale(.32); opacity: 0 } 32% { opacity: .5 } 100% { transform: scale(1.38); opacity: 0 } }
-.travel-scan { position: absolute; inset: 0; pointer-events: none; opacity: .14;
-  background: repeating-linear-gradient(to bottom, transparent 0 3px, rgb(0 0 0 / .16) 3px 4px) }
+.travel-card { position: absolute; left: 50%; top: 50%; width: 148px; height: 148px; margin: -74px 0 0 -74px;
+  overflow: hidden; border-radius: 14px; background: #141210; will-change: transform, opacity, filter;
+  box-shadow: 0 16px 36px rgb(0 0 0 / .5), 0 0 0 1px rgb(255 255 255 / .07); backface-visibility: hidden }
+.travel-card-art { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit }
+.travel-hero-card { width: 216px; height: 216px; margin: -108px 0 0 -108px; z-index: 5;
+  box-shadow: 0 28px 58px rgb(0 0 0 / .58), 0 0 0 1px rgb(255 255 255 / .1) }
+.travel-card.is-glyph { background: #1a1816 }
 .travel-clock { position: absolute; left: 50%; top: 46%; translate: -50% -50%; text-align: center; z-index: 6; pointer-events: none;
-  isolation: isolate; text-shadow: 0 10px 40px rgb(0 0 0 / .55) }
-.travel-clock::before { content: ""; position: absolute; left: 50%; top: 50%; width: 96vw; height: 62vh; translate: -50% -50%; z-index: -1;
-  background: radial-gradient(closest-side, rgb(12 11 10 / .84), rgb(12 11 10 / .4) 48%, transparent 76%); pointer-events: none }
-.travel-year { display: block; position: relative; font-family: var(--mono); font-size: clamp(72px, 14vw, 168px); font-weight: 500; letter-spacing: -.06em;
-  line-height: .9; font-variant-numeric: tabular-nums }
-.travel-md { display: block; position: relative; margin-top: .14em; font-family: var(--mono); font-size: clamp(22px, 3.4vw, 40px); letter-spacing: .28em;
-  color: rgb(243 238 230 / .88); font-variant-numeric: tabular-nums; text-shadow: 0 6px 28px rgb(12 11 10 / .9) }
-.travel-md i { font-style: normal; opacity: .35; margin: 0 .04em }
-.travel-skip { position: absolute; left: 0; right: 0; bottom: calc(28px + env(safe-area-inset-bottom)); margin: 0; text-align: center;
-  font-size: 13px; letter-spacing: .16em; color: rgb(243 238 230 / .5); z-index: 7; text-shadow: 0 2px 18px rgb(0 0 0 / .85) }
+  isolation: isolate }
+.travel-clock::before { content: ""; position: absolute; left: 50%; top: 48%; width: min(640px, 62vw); height: 260px;
+  translate: -50% -50%; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, rgb(12 11 10 / .9), rgb(12 11 10 / .55) 46%, transparent 74%) }
+.travel-year { display: block; position: relative; font-family: var(--mono); font-size: clamp(76px, 13vw, 156px); font-weight: 500;
+  letter-spacing: -.06em; line-height: .9; font-variant-numeric: tabular-nums; color: #f4efe7 }
+.travel-md { display: flex; position: relative; justify-content: center; align-items: center; gap: .18em; margin-top: .18em;
+  font-family: var(--mono); font-size: clamp(22px, 3.2vw, 36px); letter-spacing: .2em; color: rgb(243 238 230 / .9);
+  font-variant-numeric: tabular-nums }
+.travel-md i { font-style: normal; opacity: .35; margin: 0 .02em }
+.travel-roll { display: inline-block; position: relative; height: 1.2em; min-width: 1.55em; overflow: hidden; line-height: 1.2em;
+  text-align: center }
+.travel-roll-out, .travel-roll-in { display: block; width: 100% }
+.travel-roll-out { animation: roll-out .16s ease-in forwards }
+.travel-roll-in { position: absolute; inset: 0; animation: roll-in .16s ease-out forwards }
+@keyframes roll-out { to { transform: translateY(-110%); opacity: 0 } }
+@keyframes roll-in { from { transform: translateY(110%); opacity: .35 } to { transform: translateY(0); opacity: 1 } }
+.travel-skip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; margin: 0; padding: 22px 24px calc(18px + env(safe-area-inset-bottom));
+  text-align: center; font-size: 13px; letter-spacing: .16em; color: rgb(243 238 230 / .52);
+  background: linear-gradient(180deg, transparent, rgb(12 11 10 / .82) 45%, #0c0b0a 78%) }
+.travel.is-arrive .travel-stage { visibility: hidden; pointer-events: none }
 .travel.is-arrive .travel-clock,
 .travel.is-arrive .travel-skip,
 .travel.is-arrive .travel-tunnel,
-.travel.is-arrive .travel-whoosh { opacity: 0; transition: opacity .45s var(--ease); pointer-events: none }
+.travel.is-arrive .travel-hero-card,
+.travel.is-arrive .travel-streaks { opacity: 0; pointer-events: none }
+::view-transition-old(root) { animation: none; opacity: 0; mix-blend-mode: normal }
+::view-transition-new(root) { animation: none; mix-blend-mode: normal }
+::view-transition-group(travel-hero) { animation-duration: .55s; animation-timing-function: cubic-bezier(.22, 1, .36, 1) }
+::view-transition-old(travel-hero),
+::view-transition-new(travel-hero) { animation-duration: .55s; animation-timing-function: var(--ease); mix-blend-mode: normal;
+  height: 100%; overflow: hidden; border-radius: 16px }
 
 /* 到达页：始终是暗房里的全幅封面，不跟页面浅色走 */
 .travel-arrive { position: absolute; inset: 0; display: grid; place-items: center; padding: 56px 40px 64px; overflow: auto }
@@ -1014,7 +1031,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
   .travel.is-arrive .arrive-copy { animation: rise-in .65s var(--ease) both; animation-delay: 90ms }
 }
 @media (prefers-reduced-motion: reduce) {
-  .travel-whoosh, .travel-scan, .travel-card-streak { display: none }
+  .travel-streaks { display: none }
 }
 @media (max-width: 820px) {
   .arrive-inner { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 28px }

@@ -237,12 +237,16 @@
 
   <dialog id="travelOverlay" class="travel" aria-labelledby="travelTitle" aria-modal="true">
     <div class="travel-stage" id="travelStage">
-      <div class="travel-whoosh" aria-hidden="true"></div>
+      <div class="travel-streaks" aria-hidden="true"></div>
       <div class="travel-tunnel" id="travelTunnel"></div>
-      <div class="travel-scan" aria-hidden="true"></div>
+      <span class="travel-card travel-hero-card" id="travelHero" hidden></span>
       <div class="travel-clock" id="travelClock" aria-hidden="true">
         <span class="travel-year" id="travelYear"></span>
-        <span class="travel-md"><span id="travelMonth"></span><i>.</i><span id="travelDay"></span></span>
+        <span class="travel-md">
+          <span class="travel-roll" id="travelMonth"></span>
+          <i>.</i>
+          <span class="travel-roll" id="travelDay"></span>
+        </span>
       </div>
       <p class="travel-skip" id="travelSkip">点击或按 Esc 跳过</p>
     </div>

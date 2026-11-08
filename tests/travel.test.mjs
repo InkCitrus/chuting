@@ -1,12 +1,23 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, lerp, clockParts, formatClock, pickTravelCovers, fillTravelWall, cardPose, TRAVEL_MAX_COVERS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, pickTravelCovers, fillTravelWall, cardPose, heroPose, TRAVEL_MAX_COVERS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
   assert.equal(easeOut(1), 1)
   assert.ok(easeOut(0.5) > 0.5)
   assert.ok(easeOut(1.4) === 1)
+})
+
+test('easeTravel accelerates then decelerates', () => {
+  assert.equal(easeTravel(0), 0)
+  assert.equal(easeTravel(1), 1)
+  assert.ok(Math.abs(easeTravel(0.5) - 0.5) < 1e-9)
+  const early = easeTravel(0.2) - easeTravel(0)
+  const mid = easeTravel(0.6) - easeTravel(0.4)
+  const late = easeTravel(1) - easeTravel(0.8)
+  assert.ok(mid > early, 'should be faster in the middle than at the start')
+  assert.ok(mid > late, 'should be faster in the middle than at the end')
 })
 
 test('clock parts and lerp walk backward through a date', () => {
@@ -52,10 +63,28 @@ test('fillTravelWall repeats a short decoded set instead of inventing blanks', (
   assert.equal(fillTravelWall([], 18).length, 0)
 })
 
-test('card poses move toward the camera, grow, and fade when too close', () => {
-  const start = cardPose(0, 12, 0)
-  const end = cardPose(0, 12, 1)
-  assert.ok(end.z > start.z)
-  assert.ok(end.scale >= start.scale)
-  assert.ok(end.opacity <= start.opacity || end.z < 260)
+test('card poses sit on opposite walls and rush toward the camera', () => {
+  const project = pose => pose.x * 1000 / (1000 - Math.min(pose.z, 920))
+  const left = cardPose(0, 10, 0)
+  const right = cardPose(1, 10, 0)
+  assert.ok(left.x * right.x < 0)
+  assert.ok(Math.abs(left.x) > 200)
+  const later = cardPose(0, 10, 1)
+  assert.ok(later.z > left.z)
+  assert.ok(later.opacity <= left.opacity || later.z < 260)
+  const far = cardPose(0, 10, 0)
+  const midNear = cardPose(4, 10, 0.5)
+  assert.ok(Math.abs(project(far)) > 220, 'far covers stay outside the date')
+  assert.ok(Math.abs(project(far)) < Math.abs(project(midNear)), 'near covers swing wider')
+  assert.ok(far.brightness < midNear.brightness)
+  assert.ok(far.blur >= midNear.blur)
+})
+
+test('hero cover stays hidden until late, then grows out of the vanishing point', () => {
+  const early = heroPose(0.3)
+  const late = heroPose(1)
+  assert.equal(early.opacity, 0)
+  assert.ok(late.opacity === 1)
+  assert.ok(late.z > early.z)
+  assert.ok(late.scale > early.scale)
 })
