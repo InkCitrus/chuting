@@ -51,6 +51,7 @@ const cardPose = travelMod?.cardPose || ((i, n, t) => ({ x: (i % 2 ? 1 : -1) * 4
 const heroPose = travelMod?.heroPose || ((t) => ({ x: 0, y: 0, z: -200 + t * 240, scale: 0.4 + t, opacity: t < 0.6 ? 0 : 1, blur: 0, brightness: 1 }))
 const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 0, bloom: 0.4 }))
 const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
+const travelStageLayout = travelMod?.travelStageLayout || ((w, h) => ({ portrait: Number(h) > Number(w), wallX: 470, wallY: 278, faceCounts: [4, 4, 6, 6], perspective: 900, spacing: 310, zMin: -1640 }))
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
 const TRAVEL_MAX_COVERS = travelMod?.TRAVEL_MAX_COVERS || 48
@@ -1143,7 +1144,7 @@ function renderCapsuleRandom(body) {
 
 
 /* ---------- 时空穿梭 ---------- */
-const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null }
+const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0, layout: null }
 function dismissCapsuleForTravel() {
   const d = $('capsuleDialog')
   if (!d?.open) return
@@ -1207,12 +1208,32 @@ function applyCardPose(el, pose) {
 function setText(el, text) {
   if (el && el.textContent !== text) el.textContent = text
 }
+function syncTravelStageLayout() {
+  const stage = $('travelStage')
+  const layout = travelStageLayout(stage?.clientWidth || innerWidth || 1280, stage?.clientHeight || innerHeight || 800)
+  travel.layout = layout
+  if (stage) {
+    stage.style.setProperty('--travel-perspective', `${layout.perspective}px`)
+    stage.classList.toggle('is-portrait', !!layout.portrait)
+  }
+  return layout
+}
+function paintTravelBack(event) {
+  const img = $('travelBackImg')
+  if (!img) return
+  const src = event?.cover && travelArts.get(event.cover)
+  if (!src) { img.hidden = true; return }
+  const url = src.currentSrc || src.src
+  if (img.getAttribute('src') !== url) img.src = url
+  img.hidden = false
+}
 function poseTravelCards(t, reverse = false) {
   const cards = $('travelTunnel')?.children || []
   const n = cards.length
+  const layout = travel.layout || syncTravelStageLayout()
   let pass = '', passZ = -Infinity
   for (let i = 0; i < n; i++) {
-    const pose = cardPose(i, n, t, reverse)
+    const pose = cardPose(i, n, t, reverse, layout)
     applyCardPose(cards[i], pose)
     if (pose.opacity > 0.55 && pose.z > passZ && cards[i].dataset.name) {
       passZ = pose.z
@@ -1571,7 +1592,7 @@ function switchArrival(item, { play = true } = {}) {
     revealShelfItem(item)
   }
   paintArriveBg(item, { fade: true })
-  if (!motion || reduced.matches) { swap(); return }
+  if (!motion || reduced.matches || !play) { swap(); return }
   const ease = 'cubic-bezier(.16, 1, .3, 1)'
   // Cover: the old one stays on top as a ghost and drifts away while the new one settles in beneath.
   const oldArt = $('arriveArt')
@@ -1604,11 +1625,19 @@ function switchArrival(item, { play = true } = {}) {
       { duration: 560, delay: i * 50, easing: ease, fill: 'backwards' }))
   })
 }
+function syncTravelEventFromPlayer() {
+  const current = player?.current
+  if (!current || !travel.open) return travel.event
+  if (travel.event?.song_id === current.song_id) return travel.event
+  travel.event = current
+  travel.toMs = current.first_listen_ms || travel.toMs
+  return current
+}
 function finishGoing() {
+  const event = syncTravelEventFromPlayer() || travel.event
   travel.phase = 'arrive'
   paintTravelClock(travel.toMs, true)
   poseTravelCards(1, false)
-  const event = travel.event
   const hero = $('travelHero')
   const canMorph = motion && !reduced.matches && typeof document.startViewTransition === 'function'
     && hero && !hero.hidden && event?.cover && hero.querySelector('img')
@@ -1616,14 +1645,14 @@ function finishGoing() {
     hero.style.viewTransitionName = 'travel-hero'
     const vt = document.startViewTransition(() => {
       hero.style.viewTransitionName = ''
-      showArrival(event)
+      showArrival(travel.event || event)
       const art = $('arriveArt')
       if (art) art.style.viewTransitionName = 'travel-hero'
     })
     vt.finished.finally(() => { const art = $('arriveArt'); if (art) art.style.viewTransitionName = '' })
     return
   }
-  showArrival(event)
+  showArrival(travel.event || event)
 }
 function skipTravel() {
   if (travel.phase !== 'going' && travel.phase !== 'waiting') return
@@ -1634,7 +1663,9 @@ function beginTravelMotion(event, arts) {
   if (travel.event !== event || (travel.phase !== 'going' && travel.phase !== 'waiting')) return
   travel.phase = 'going'
   travel.clockAt = 0
+  syncTravelStageLayout()
   buildTravelTunnel(event, arts)
+  paintTravelBack(travel.event || event)
   applyTravelGlow(event)
   if ($('travelClock')) $('travelClock').style.opacity = '1'
   poseTravelCards(0, false)
@@ -1661,6 +1692,7 @@ function startTravel(event, { source = 'random' } = {}) {
   travel.source = source
   travel.open = true
   travel.phase = 'waiting'
+  travel.skips = 0
   travel.fromMs = continuing ? (continuing.first_listen_ms || Date.now()) : Date.now()
   travel.toMs = event.first_listen_ms || travel.fromMs
   const quiet = reduced.matches || !motion
@@ -1686,8 +1718,9 @@ function startTravel(event, { source = 'random' } = {}) {
   if (event.cover) decodeTravelCover(event.cover)
   if (quiet) { finishGoing(); return }
   collectTunnelArts(event).then(arts => {
-    if (travel.event !== event || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
-    beginTravelMotion(event, arts)
+    if (!travel.open || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
+    // The player may already have skipped to another playable track.
+    beginTravelMotion(travel.event || event, arts)
   })
 }
 function rerollTravel() {
@@ -2312,11 +2345,24 @@ addEventListener('online', () => { state.offline = false; renderStatus(); checkS
 /* ---------- 播放器 ---------- */
 // Plays through the worker's song_url (the account's own rights); prev/next and the end of a song move along the timeline.
 const playerAt = (event, delta) => { const i = state.view.findIndex(x => x.song_id === event?.song_id); return i < 0 ? null : state.view[i + delta] }
+function followTravelPlayer(event) {
+  if (!travel.open || !event) return
+  if (travel.event?.song_id === event.song_id) return
+  if (travel.phase === 'arrive') {
+    switchArrival(event, { play: false })
+    return
+  }
+  if (travel.phase === 'going' || travel.phase === 'waiting') {
+    travel.event = event
+    travel.toMs = event.first_listen_ms || travel.toMs
+    paintTravelBack(event)
+  }
+}
 function playRelative(delta) {
   const next = playerAt(player.current, delta)
   if (!next) return
   if ($('songDialog').open && state.view[state.current]?.song_id === player.current?.song_id) fillSong(next)
-  if (travel.open && travel.phase === 'arrive' && travel.event?.song_id === player.current?.song_id) {
+  if (travel.open && travel.phase === 'arrive') {
     switchArrival(next)
     return
   }
@@ -2328,6 +2374,14 @@ player = createPlayer({
   getUrl: (event, query = {}) => remote('/api/netease', { method: 'song_url', query: { id: String(event.song_id), name: event.name || '', artist: event.artists || '', ...query }, uid: state.account?.uid }),
   coverFor: event => (event.cover ? px => coverSize(event.cover, px) : null),
   onEnded: () => playRelative(1),
+  onChange: event => followTravelPlayer(event),
+  onUnplayable: () => {
+    if (!travel.open) return
+    if (travel.phase !== 'arrive' && travel.phase !== 'going' && travel.phase !== 'waiting') return
+    if (travel.skips >= 8) return
+    travel.skips += 1
+    playRelative(1)
+  },
   onOpen: event => showSong(state.view.find(x => x.song_id === event.song_id) || event)
 })
 player.setActions(() => playRelative(-1), () => playRelative(1))

@@ -49,10 +49,10 @@ export function playErrorMessage(err, _mediaError, answer) {
   return PLAYER_LINES.failed
 }
 
-export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
+export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onChange, onUnplayable }) {
   const audio = new Audio()
   audio.preload = 'auto'
-  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, offline: false, seeking: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0 }
+  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, offline: false, seeking: false, replacing: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0 }
   let fadeRaf = 0
   let mediaEpoch = 0
   let recovery = null
@@ -130,6 +130,11 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       mini.play.setAttribute('aria-label', miniPlaying ? '暂停' : '播放')
       mini.root.style.setProperty('--pos', liveDur ? (livePos / liveDur).toFixed(4) : 0)
     }
+    if (mini.root.dataset) {
+      mini.root.dataset.playingId = state.event?.song_id != null ? String(state.event.song_id) : ''
+      const src = audio.currentSrc || audio.src || ''
+      mini.root.dataset.audioSrc = src && !src.startsWith('data:') ? src : ''
+    }
   }
   function session() {
     if (!('mediaSession' in navigator) || !state.event) return
@@ -142,11 +147,24 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     try { navigator.mediaSession.setPositionState({ duration: audio.duration, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, audio.duration) }) } catch {}
   }
   function stale() { return { ok: false, error: '', reason: '', trial: false } }
+  function adopt(event) {
+    const prev = state.event
+    state.event = event
+    if (event && event.song_id !== prev?.song_id) {
+      try { onChange?.(event) } catch {}
+    }
+  }
   function clearSrc() {
     mediaEpoch++
+    state.replacing = true
     try { audio.pause() } catch {}
     audio.removeAttribute('src')
-    try { audio.load() } catch {}
+    // Do not call audio.load() on an empty element: on iOS / mobile Chrome
+    // that drops the user-gesture unlock and can fire a spurious `ended`.
+  }
+  function noteUnplayable(event, result) {
+    try { onUnplayable?.(event, result) } catch {}
+    return result
   }
   async function requestUrl(event, fallback, gen) {
     try {
@@ -177,7 +195,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       try { navigator.mediaSession.playbackState = 'paused' } catch {}
     }
     render()
-    return status()
+    return noteUnplayable(state.event, status())
   }
   function settle(gen, err) {
     if (gen !== state.gen) return recovery || stale()
@@ -202,7 +220,8 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     if (!fallback) recovery = null
     if (state.offline) {
       state.gen++
-      state.event = event; state.answer = null; state.error = ''; state.failed = false; state.loading = false; state.pendingFade = 0
+      adopt(event); state.answer = null; state.error = ''; state.failed = false; state.loading = false; state.pendingFade = 0
+      mini.title.textContent = event.name; mini.artist.textContent = event.artists || ''
       audio.muted = false
       applyGain(1)
       clearSrc()
@@ -210,8 +229,10 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       return { ok: false, error: PLAYER_LINES[state.offline] || PLAYER_LINES.offline, reason: state.offline, trial: false }
     }
     const gen = ++state.gen
-    state.event = event; state.answer = null; state.error = ''; state.failed = false; state.loading = true; state.retried = Boolean(fallback)
-    clearSrc()
+    adopt(event); state.answer = null; state.error = ''; state.failed = false; state.loading = true; state.retried = Boolean(fallback)
+    // Keep any muted/primed playback alive until the new URL arrives so a
+    // play() started in a tap gesture still counts after the network wait.
+    state.replacing = true
     mini.title.textContent = event.name; mini.artist.textContent = event.artists || ''
     mini.cover.replaceChildren(); const art = coverFor(event); if (art) { const img = new Image(); img.alt = ''; img.decoding = 'async'; img.src = art(96); mini.cover.append(img) }
     render(); session()
@@ -222,7 +243,8 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       state.answer = answer
       if (!answer.url) {
         state.pendingFade = 0; audio.muted = false; applyGain(1); state.loading = false; state.failed = true
-        render(); return status()
+        clearSrc()
+        render(); return noteUnplayable(event, status())
       }
       // Skip FLAC / hi-res even when canPlayType says yes: 24-bit files and mislabeled 403s both surface as code 4.
       if (!state.retried && hardAnswer(answer)) return settle(gen, { name: 'Error' })
@@ -234,6 +256,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       if (state.pendingFade) { applyGain(0); audio.muted = true }
       if (autoplay) await audio.play()
       if (gen !== state.gen) return stale()
+      state.replacing = false
       if (state.pendingFade) {
         const fade = state.pendingFade
         state.pendingFade = 0
@@ -245,7 +268,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
       }
     } catch (err) {
       if (err?.name === 'NotAllowedError' && gen === state.gen) {
-        state.pendingFade = 0; audio.muted = false; state.error = ''; state.failed = false; state.loading = false; render(); return status()
+        state.pendingFade = 0; audio.muted = false; state.error = ''; state.failed = false; state.loading = false; state.replacing = false; render(); return status()
       }
       if (gen !== state.gen) return recovery || stale()
       if (err?.name === 'AbortError') return recovery || status()
@@ -255,6 +278,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     }
     if (gen !== state.gen) return stale()
     state.loading = false
+    state.replacing = false
     render()
     return status()
   }
@@ -311,7 +335,11 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     if (type === 'durationchange' || type === 'play') position()
     if ('mediaSession' in navigator && (type === 'play' || type === 'pause')) navigator.mediaSession.playbackState = state.failed || audio.paused ? 'paused' : 'playing'
   })
-  audio.addEventListener('ended', () => onEnded(state.event))
+  audio.addEventListener('ended', () => {
+    if (state.loading || state.replacing || state.failed) return
+    if (!state.event || !state.answer?.url) return
+    onEnded(state.event)
+  })
   els.play.addEventListener('click', toggle)
   mini.play.addEventListener('click', () => {
     if (!state.event) return
@@ -364,7 +392,8 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen }) {
     unlock() {
       try {
         audio.muted = true
-        if (!audio.getAttribute('src')) audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+        const src = (audio.getAttribute && audio.getAttribute('src')) || audio.src
+        if (!src) audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
         const p = audio.play()
         if (p && p.catch) p.catch(() => {})
       } catch {}

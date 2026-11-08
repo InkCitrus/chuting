@@ -38,6 +38,7 @@ class FakeAudio extends EventTarget {
     return Promise.resolve()
   }
   pause() { this.paused = true; this.dispatchEvent(new Event('pause')) }
+  getAttribute(name) { return name === 'src' ? (this.src || null) : null }
   load() {
     // An empty element reports code 4. Browsers do this while src is still blank; a later song must not inherit it.
     if (!this.src) {
@@ -74,7 +75,7 @@ function mount() {
   const volume = { value: 1, style: { setProperty() {} }, addEventListener() {} }
   const miniClasses = classes()
   const mini = {
-    root: { hidden: true, classList: miniClasses, style: { setProperty() {} } },
+    root: { hidden: true, classList: miniClasses, style: { setProperty() {} }, dataset: {} },
     play: { label: '', setAttribute(key, value) { if (key === 'aria-label') this.label = value }, addEventListener() {} },
     open: { addEventListener() {} },
     close: { addEventListener() {} },
@@ -348,6 +349,62 @@ test('a zone miss on one edge plays from the twin edge without asking NetEase ag
     assert.equal(env.audio().src, 'https://m7.music.126.net/2026/ymusic/zone-miss.mp3')
     assert.equal(player.playing, true)
     assert.notEqual(note.textContent, PLAYER_LINES.failed)
+  } finally {
+    env.restore()
+  }
+})
+
+test('ended while the next song is loading does not skip, and onChange follows the new track', async () => {
+  const env = install('probably')
+  try {
+    const { els, mini } = mount()
+    let ended = 0
+    const changes = []
+    const player = createPlayer({
+      els, mini,
+      getUrl: async event => {
+        if (event.song_id === 'b') await new Promise(r => setTimeout(r, 30))
+        return { url: `https://m801.music.126.net/${event.song_id}.mp3`, type: 'mp3', duration: 180000 }
+      },
+      coverFor: () => null,
+      onEnded() { ended++ },
+      onChange(event) { changes.push(event.song_id) },
+      onOpen() {}
+    })
+    await player.play({ song_id: 'a', name: '甲' })
+    assert.deepEqual(changes, ['a'])
+    env.audio().dispatchEvent(new Event('ended'))
+    assert.equal(ended, 1)
+    const next = player.play({ song_id: 'b', name: '乙' })
+    env.audio().dispatchEvent(new Event('ended'))
+    await next
+    assert.equal(ended, 1)
+    assert.deepEqual(changes, ['a', 'b'])
+    assert.equal(player.current.song_id, 'b')
+    assert.equal(mini.root.dataset.playingId, 'b')
+  } finally {
+    env.restore()
+  }
+})
+
+test('an unplayable answer notifies onUnplayable', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    let seen = null
+    const player = createPlayer({
+      els, mini,
+      getUrl: async () => ({ url: null, reason: 'rights' }),
+      coverFor: () => null,
+      onEnded() {},
+      onOpen() {},
+      onUnplayable(event, result) { seen = { id: event.song_id, reason: result.reason } }
+    })
+    await player.play({ song_id: 'vip', name: '会员曲' })
+    assert.equal(seen?.id, 'vip')
+    assert.equal(seen?.reason, 'rights')
+    assert.equal(player.current.song_id, 'vip')
+    assert.equal(player.playing, false)
   } finally {
     env.restore()
   }

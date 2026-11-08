@@ -103,8 +103,40 @@ export function fillTravelWall(items, want = TRAVEL_TILES) {
   return out
 }
 
-export function tileLayout(i, n = TRAVEL_TILES) {
-  const counts = TRAVEL_FACE_COUNTS
+export function travelStageLayout(width, height) {
+  const w = Math.max(1, Number(width) || 0)
+  const h = Math.max(1, Number(height) || 0)
+  const portrait = h > w * 1.08
+  if (!portrait) {
+    return {
+      portrait: false,
+      wallX: 470,
+      wallY: 278,
+      faceCounts: TRAVEL_FACE_COUNTS.slice(),
+      perspective: 900,
+      spacing: 310,
+      zMin: -1640,
+      rotateX: 24,
+      rotateY: 28
+    }
+  }
+  // Side walls sit inside a phone frame so covers stream through the whole
+  // portrait, not only the far corners of a landscape-sized tube.
+  return {
+    portrait: true,
+    wallX: Math.round(Math.min(178, Math.max(128, w * 0.42))),
+    wallY: Math.round(Math.min(380, Math.max(248, h * 0.40))),
+    faceCounts: [6, 6, 4, 4],
+    perspective: 640,
+    spacing: 250,
+    zMin: -1420,
+    rotateX: 14,
+    rotateY: 16
+  }
+}
+
+export function tileLayout(i, n = TRAVEL_TILES, faceCounts = TRAVEL_FACE_COUNTS) {
+  const counts = Array.isArray(faceCounts) && faceCounts.length ? faceCounts : TRAVEL_FACE_COUNTS
   const perRing = counts.reduce((sum, count) => sum + count, 0)
   const rings = Math.max(1, Math.round((Number(n) || TRAVEL_TILES) / perRing) || TRAVEL_RINGS)
   const index = ((Number(i) || 0) % (rings * perRing) + rings * perRing) % (rings * perRing)
@@ -120,26 +152,28 @@ export function tileLayout(i, n = TRAVEL_TILES) {
 
 // Rectangular tube: more tiles on floor/ceiling than on the side walls so a
 // wide frame fills a landscape screen. Rings wrap along Z to stay dense.
-export function cardPose(i, n, t, reverse = false) {
+export function cardPose(i, n, t, reverse = false, layout = null) {
   const p = reverse ? 1 - t : t
-  const { ring, face, col, rings, across } = tileLayout(i, n)
-  const spacing = 310
+  const { ring, face, col, rings, across } = tileLayout(i, n, layout?.faceCounts)
+  const spacing = layout?.spacing ?? 310
   const length = rings * spacing
-  const zMin = -1640
+  const zMin = layout?.zMin ?? -1640
   const shift = p * length * 2.25
   let z = zMin + ring * spacing + shift
   z = zMin + ((z - zMin) % length + length) % length
 
-  const wallX = 470
-  const wallY = 278
+  const wallX = layout?.wallX ?? 470
+  const wallY = layout?.wallY ?? 278
   const pitchY = across > 1 ? (2 * wallY) / (across - 1) : 0
   const pitchX = across > 1 ? (2 * wallX) / (across - 1) : 0
   const offset = col - (across - 1) / 2
+  const tiltY = layout?.rotateY ?? 28
+  const tiltX = layout?.rotateX ?? 24
   let x = 0, y = 0, rotateX = 0, rotateY = 0
-  if (face === 0) { x = -wallX; y = offset * pitchY; rotateY = 28 }
-  else if (face === 1) { x = wallX; y = offset * pitchY; rotateY = -28 }
-  else if (face === 2) { y = -wallY; x = offset * pitchX; rotateX = -24 }
-  else { y = wallY; x = offset * pitchX; rotateX = 24 }
+  if (face === 0) { x = -wallX; y = offset * pitchY; rotateY = tiltY }
+  else if (face === 1) { x = wallX; y = offset * pitchY; rotateY = -tiltY }
+  else if (face === 2) { y = -wallY; x = offset * pitchX; rotateX = -tiltX }
+  else { y = wallY; x = offset * pitchX; rotateX = tiltX }
 
   const nearness = Math.min(1, Math.max(0, (z - zMin) / Math.max(1, length - 220)))
   const brightness = 0.2 + 0.8 * nearness
