@@ -167,15 +167,77 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 .button.is-running::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent) }
 @media (prefers-reduced-motion: no-preference) { .button.is-running::before { animation: pulse 1.4s ease-in-out infinite } }
 .button.large { min-height: 52px; padding: 12px 30px; font-size: 16px; letter-spacing: .02em }
-.text-button { border: 0; background: transparent; color: var(--accent); font-weight: 600; font-size: 14px; padding: 2px; white-space: nowrap; background-image: linear-gradient(currentColor, currentColor); background-size: 0 1px; background-position: 0 100%; background-repeat: no-repeat; transition: background-size .35s var(--ease) }
-.text-button:hover { background-size: 100% 1px }
-.icon-button { height: 36px; width: 36px; border: 1px solid var(--line); border-radius: 50%; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; color: var(--ink-2); transition: border-color .2s, color .2s, transform .3s var(--spring), background-color .2s; flex-shrink: 0 }
-.icon-button:hover:not(:disabled) { border-color: var(--ink); color: var(--ink); transform: scale(1.06) }
+.text-link, .text-button {
+  border: 0;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: .35em;
+  min-height: 40px;
+  padding: 8px 2px;
+  color: var(--accent);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.3;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0 1px;
+  background-position: left calc(100% - 8px);
+  background-repeat: no-repeat;
+  transition: color .25s var(--ease), background-size .35s var(--ease), transform .2s var(--ease), opacity .2s var(--ease);
+}
+.text-link { color: var(--ink) }
+.text-link:hover, .text-button:hover { color: var(--accent); background-size: 100% 1px }
+.text-link:active:not(:disabled), .text-button:active:not(:disabled) { transform: translateY(1px); transition-duration: .08s }
+.text-link.serif {
+  font-family: var(--serif);
+  font-size: clamp(16px, 1.45vw, 19px);
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.text-link.serif::after {
+  content: "→";
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: .78em;
+  opacity: .4;
+  transition: transform .3s var(--ease), opacity .3s var(--ease);
+}
+.text-link.serif:hover::after { opacity: 1; transform: translateX(3px) }
+.text-link.is-running { color: var(--ink); font-variant-numeric: tabular-nums }
+.text-link.is-running::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .text-link.is-running::before { animation: pulse 1.4s ease-in-out infinite }
+}
+.icon-button {
+  height: 40px;
+  width: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--ink-2);
+  transition: color .22s var(--ease), background-color .22s var(--ease), transform .3s var(--spring);
+  flex-shrink: 0;
+}
+.icon-button:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent) }
+.icon-button:focus-visible { border-radius: 50% }
 .gear { font-size: 17px }
 .gear svg { transition: transform .55s var(--ease) }
 .gear:hover svg { transform: rotate(45deg) }
 .gear[aria-expanded="true"] svg { transform: rotate(30deg) }
-.icon-button:active:not(:disabled) { transform: scale(.92); transition-duration: .08s }
+.icon-button:active:not(:disabled) { transform: scale(.94); transition-duration: .08s }
 .button:active:not(:disabled) { transform: scale(.97); transition-duration: .08s }
 .kicker { font-size: 13px; letter-spacing: .18em; font-weight: 500; color: var(--accent); margin: 0 0 14px }
 
@@ -238,8 +300,22 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .hero-sub { color: var(--muted); font-size: 15px; margin: 18px 0 0; max-width: 40em }
 .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin-top: 34px }
 .hero-actions:has(> :not([hidden])) { min-height: 52px }
-.scroll-cue { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); border-bottom: 1px solid var(--line); padding-bottom: 3px; transition: color .2s, border-color .2s }
-.scroll-cue:hover { color: var(--accent); border-color: var(--accent) }
+.scroll-cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--ink-2);
+  padding: 8px 0;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0 1px;
+  background-position: left calc(100% - 8px);
+  background-repeat: no-repeat;
+  transition: color .25s var(--ease), background-size .35s var(--ease);
+}
+.scroll-cue:hover { color: var(--accent); background-size: 100% 1px }
 .scroll-cue svg { font-size: 15px }
 @media (prefers-reduced-motion: no-preference) { .scroll-cue svg { animation: nudge 2.4s ease-in-out infinite } }
 @keyframes nudge { 50% { transform: translateY(3px) } }
@@ -290,7 +366,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .hl-line { font-size: 13.5px; color: var(--muted); line-height: 1.6; margin-top: 6px }
 .hl-open:hover .hl-title { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; text-underline-offset: 6px }
 .hl-controls { display: flex; align-items: center; gap: 10px; margin-top: 18px }
-.hl-controls .icon-button { width: 32px; height: 32px; font-size: 13px }
+.hl-controls .icon-button { width: 40px; height: 40px; font-size: 15px }
 .hl-dots { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 0 }
 .hl-dot { position: relative; height: 24px; width: 16px; border: 0; padding: 0; background: transparent; flex: 0 1 auto; transition: width .45s var(--ease) }
 .hl-dot::before, .hl-dot i { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 2px; border-radius: 2px; background: var(--line) }
@@ -614,8 +690,9 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .bar-inner { padding: 0 16px; gap: 8px }
   .account-label { display: none }
   .bar-actions { gap: 8px }
-  .bar-actions .button { padding: 5px 14px; min-height: 34px; font-size: 13px }
-  .bar-actions .icon-button { width: 34px; height: 34px }
+  .bar-actions { gap: 4px }
+  .bar-actions .text-link { font-size: 13px }
+  .bar-actions .icon-button { width: 40px; height: 40px }
   main { padding: 0 18px }
   .mobile-break { display: inline }
   .hero { padding: 7vh 0 32px; gap: 30px }
@@ -629,7 +706,6 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hero:has(#heroCapsule:not([hidden])) .highlights { margin-top: 0 }
   .hero-capsule { margin-top: 20px; padding-top: 16px; max-width: none }
   .hero-capsule-line { font-size: 16px }
-  .hero-capsule-actions .button { flex: 1 1 calc(50% - 8px); min-width: 0; padding: 8px 10px; font-size: 13px }
   .sync-line { margin-top: 32px; font-size: 13.5px }
   .highlights { padding: 14px; border-radius: 20px }
   .hl-stage { height: 128px }
@@ -724,8 +800,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
 /* 按钮与图标：按下时轻压，松手弹回 */
 .button { transition: background-color var(--d-2), color var(--d-2), border-color var(--d-2), transform var(--d-3) var(--spring), box-shadow var(--d-2) }
 .button:active:not(:disabled) { transform: scale(.955); transition-duration: var(--d-1), var(--d-1), var(--d-1), .08s, var(--d-1) }
-.icon-button { transition: border-color var(--d-1), color var(--d-1), transform var(--d-3) var(--spring), background-color var(--d-1) }
-.icon-button:active:not(:disabled) { transform: scale(.88); transition-duration: var(--d-1), var(--d-1), .08s, var(--d-1) }
+.icon-button { transition: color var(--d-1), background-color var(--d-1), transform var(--d-3) var(--spring) }
+.icon-button:active:not(:disabled) { transform: scale(.94); transition-duration: var(--d-1), var(--d-1), .08s }
 .hl-dot:active i, .hl-dot:active::before { transform-origin: 50% 50% }
 
 /* 唱片：首次进入时从上方落下，弹簧收住；随后唱片滑出 */
@@ -1020,8 +1096,7 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 .hero-capsule[hidden] { display: none }
 .hero-capsule-kicker { margin: 0 0 8px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; color: var(--accent) }
 .hero-capsule-line { margin: 0 0 14px; font-family: var(--serif); font-size: clamp(17px, 1.55vw, 20px); line-height: 1.5; color: var(--ink) }
-.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px }
-.hero-capsule-actions .button { min-height: 40px; padding: 8px 16px }
+.hero-capsule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 28px }
 @media (prefers-reduced-motion: no-preference) {
   .hero-capsule { animation: rise-in var(--d-4) var(--ease) both; animation-delay: calc(var(--stagger) * 12) }
 }

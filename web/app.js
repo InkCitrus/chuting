@@ -306,11 +306,11 @@ function renderStatus() {
   bar.classList.toggle('is-running', running())
   if (running()) {
     const pct = run.total ? Math.round(100 * (run.queried || 0) / run.total) : 0
-    bar.textContent = pct ? `暂停 · ${pct}%` : '暂停同步'; bar.dataset.action = 'pause'; bar.className = 'button ghost is-running'
-  } else if (!has) { bar.textContent = '连接网易云'; bar.dataset.action = 'connect'; bar.className = 'button primary' }
-  else if (state.offline) { bar.textContent = '离线浏览'; bar.dataset.action = ''; bar.disabled = true; bar.className = 'button ghost' }
-  else if (state.local && !online) { bar.textContent = '扫码登录'; bar.dataset.action = 'connect'; bar.className = 'button primary' }
-  else { bar.textContent = '同步'; bar.dataset.action = 'sync'; bar.className = 'button primary' }
+    bar.textContent = pct ? `暂停 · ${pct}%` : '暂停同步'; bar.dataset.action = 'pause'; bar.className = 'text-link is-running'
+  } else if (!has) { bar.textContent = '连接网易云'; bar.dataset.action = 'connect'; bar.className = 'text-link' }
+  else if (state.offline) { bar.textContent = '离线浏览'; bar.dataset.action = ''; bar.disabled = true; bar.className = 'text-link' }
+  else if (state.local && !online) { bar.textContent = '扫码登录'; bar.dataset.action = 'connect'; bar.className = 'text-link' }
+  else { bar.textContent = '同步'; bar.dataset.action = 'sync'; bar.className = 'text-link' }
 
   const story = $('heroStory'), sub = $('heroSub'), action = $('heroAction'), tagline = $('heroTagline')
   story.classList.toggle('is-loading', state.loading)
