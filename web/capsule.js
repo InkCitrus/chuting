@@ -22,6 +22,14 @@ export function monthDayDistance(a, b) {
   return Math.min(diff, 366 - diff)
 }
 
+// From `from`, is `day` reached by going backward on the calendar (or tied)?
+export function isPastMonthDay(from, day) {
+  const da = dayOrdinal(from.m, from.d), db = dayOrdinal(day.m, day.d)
+  const back = (da - db + 366) % 366
+  const forward = (db - da + 366) % 366
+  return back <= forward
+}
+
 export function onThisDay(events, now = new Date()) {
   const today = localYmd(now)
   if (!today) return []
@@ -45,7 +53,7 @@ export function nearestDay(events, now = new Date()) {
   for (const event of events || []) {
     if (!event?.first_listen_ms) continue
     const when = localYmd(event.first_listen_ms)
-    if (!when) continue
+    if (!when || when.y >= today.y) continue
     const dist = monthDayDistance(when, today)
     if (dist === 0) continue
     const key = `${when.m}-${when.d}`
@@ -54,7 +62,11 @@ export function nearestDay(events, now = new Date()) {
     groups.set(key, group)
   }
   if (!groups.size) return null
-  const best = [...groups.values()].sort((a, b) => a.dist - b.dist || a.m - b.m || a.d - b.d)[0]
+  const best = [...groups.values()].sort((a, b) =>
+    a.dist - b.dist
+    || (isPastMonthDay(today, a) ? 0 : 1) - (isPastMonthDay(today, b) ? 0 : 1)
+    || a.m - b.m
+    || a.d - b.d)[0]
   best.songs.sort((a, b) => a.event.first_listen_ms - b.event.first_listen_ms)
   return best
 }

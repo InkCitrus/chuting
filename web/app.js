@@ -307,9 +307,10 @@ function countUp(root, from = []) {
   for (const [k, b] of [...root.querySelectorAll('.num')].entries()) {
     const target = Number(b.textContent.replace(/[^\d]/g, '')), origin = from[k] ?? 0
     if (!target || target < 3 || origin === target) continue
-    const start = performance.now(), duration = from.length ? 700 : Math.min(1400, 600 + target * 4)
+    const start = performance.now() + k * 90, duration = from.length ? 700 : Math.min(1400, 600 + target * 4)
     b.classList.add('counting')
     const tick = now => {
+      if (now < start) { requestAnimationFrame(tick); return }
       const t = Math.min(1, (now - start) / duration), eased = 1 - (1 - t) ** 4
       b.textContent = n(Math.round(origin + (target - origin) * eased))
       if (t < 1) requestAnimationFrame(tick); else b.classList.remove('counting')
@@ -384,7 +385,11 @@ function renderStatus() {
       if (!state.counted && first) { state.counted = true; countUp(story) }
       else if (before.length) countUp(story, before) // numbers glide from the old value while a sync adds songs
     }
-    clearCopy(sub, pendingNow(stats) ? `还有 ${n(pendingNow(stats))} 首在排队` : wideScope() ? '都查完了' : '你喜欢的歌都查完了')
+    clearCopy(sub, pendingNow(stats)
+      ? `还有 ${n(pendingNow(stats))} 首在排队`
+      : state.local && !online
+        ? '这份档案来自备份，扫码后就能接着同步'
+        : wideScope() ? '都查完了' : '你喜欢的歌都查完了')
     renderHeroStats({ ...shown, range: `${padDate(ey, em, ed)}  —  ${padDate(ly, lm, ld)}` })
     $('scrollCue').hidden = false
     $('scrollCueText').textContent = state.order === 'newest' ? '最近的一首' : '最早的一首'

@@ -525,7 +525,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .compact .day { padding-bottom: 20px }
 .compact .songs::before { bottom: -20px }
 
-.motion .reveal { opacity: 0; transform: translateY(26px); transition: opacity .9s var(--ease), transform .9s var(--ease) }
+.motion .reveal { opacity: 0; transform: translateY(18px); transition: opacity .72s var(--ease), transform .72s var(--ease) }
 .motion .reveal.shown { opacity: 1; transform: none }
 .motion .chapter-head.reveal .chapter-numeral { transition: clip-path 1.3s var(--ease) .1s; clip-path: inset(0 100% 0 0) }
 .motion .chapter-head.reveal.shown .chapter-numeral { clip-path: inset(0 -10% -10% -10%) }
@@ -839,6 +839,21 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
     margin-top: 4px;
     padding-top: 12px;
     font-size: 13px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-stats:not([hidden]) {
+      animation: rise-in var(--d-4) var(--ease) both;
+      animation-delay: calc(var(--stagger) * 13);
+    }
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-stat:nth-child(1) .num { animation: rise-in var(--d-3) var(--ease) both; animation-delay: calc(var(--stagger) * 13) }
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-stat:nth-child(2) .num { animation: rise-in var(--d-3) var(--ease) both; animation-delay: calc(var(--stagger) * 14) }
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-stat:nth-child(3) .num { animation: rise-in var(--d-3) var(--ease) both; animation-delay: calc(var(--stagger) * 15) }
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-capsule { animation-delay: calc(var(--stagger) * 16) }
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .hero-actions { animation-delay: calc(var(--stagger) * 18) }
+    .hero.has-highlights:has(#heroCapsule:not([hidden])) .sync-line {
+      animation: rise-in var(--d-4) var(--ease) both;
+      animation-delay: calc(var(--stagger) * 20);
+    }
   }
   .intro-title { font-size: 25px }
   .intro-steps li { padding: 20px 20px 18px }
@@ -1174,8 +1189,8 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 }
 .song.is-locate .song-cover { outline: 1.5px solid var(--accent); outline-offset: 2px }
 @media (prefers-reduced-motion: no-preference) {
-  .song.is-locate { animation: locate-row .9s var(--ease) }
-  .song.is-locate .song-cover { animation: locate-cover .8s var(--spring-soft) }
+  .song.is-locate { animation: locate-row 1.45s var(--ease) }
+  .song.is-locate .song-cover { animation: locate-cover 1.15s var(--spring-soft) }
 }
 @keyframes locate-row { from { opacity: .55; transform: translateX(-6px) } to { opacity: 1; transform: none } }
 @keyframes locate-cover { from { transform: scale(.86); opacity: .6 } }
@@ -1356,6 +1371,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 @media (prefers-reduced-motion: no-preference) {
   .travel.is-arrive .arrive-art { animation: rise-in .65s var(--ease) both }
   .travel.is-arrive .arrive-copy { animation: rise-in .65s var(--ease) both; animation-delay: 90ms }
+  .travel.is-arrive .arrive-actions { animation: rise-in .55s var(--ease) both; animation-delay: 180ms }
 }
 @media (prefers-reduced-motion: reduce) {
   .travel-streaks, .travel-chroma, .travel-flash, .travel-grain, .travel-bloom { display: none }
