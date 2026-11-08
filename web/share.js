@@ -84,52 +84,75 @@ function coverOf(songs) {
   return ''
 }
 
-// Fill a 6×11 wall with as many distinct covers as possible. The first listen stays
-// in the highlighted corner; empty tiles are avoided when any real cover exists, and
-// the same cover is not placed on a 4-adjacent neighbour unless it is the only choice.
-function buildWall(events) {
-  const cols = 6
-  const firstCover = events[0]?.cover || ''
+function albumIdOf(event) {
+  const raw = event?.album_id ?? event?.albumId
+  return /^[1-9]\d{0,17}$/.test(String(raw || '')) ? String(raw) : ''
+}
+
+// Same picture if the path matches after dropping query strings, p1–p4 hosts, and a trailing size suffix.
+export function coverKey(url) {
+  const clean = coverUrl(url) || String(url || '').trim()
+  if (!clean) return ''
+  let path = clean
+  try { path = new URL(clean, 'https://p1.music.126.net').pathname } catch {
+    path = clean.replace(/^[a-z]+:\/\/[^/]+/i, '').split('?')[0]
+  }
+  try { path = decodeURIComponent(path) } catch { /* keep the raw path */ }
+  return path.toLowerCase().replace(/[_-](\d{2,4})[xy](\d{2,4})(?=\.[a-z0-9]+$)/i, '')
+}
+
+function uniqueCovers(events) {
   const unique = []
-  const seen = new Set()
-  for (const event of events) {
+  const seenKey = new Set()
+  const seenAlbum = new Set()
+  for (const event of events || []) {
     const cover = event.cover || ''
-    if (!cover || seen.has(cover)) continue
-    seen.add(cover)
+    if (!cover) continue
+    const key = coverKey(cover)
+    const album = albumIdOf(event)
+    if ((key && seenKey.has(key)) || (album && seenAlbum.has(album))) continue
+    if (key) seenKey.add(key)
+    if (album) seenAlbum.add(album)
     unique.push(cover)
   }
-  const wall = Array.from({ length: WALL }, (_, i) => ({ cover: '', first: i === 0 }))
-  wall[0].cover = firstCover
-  if (!unique.length) return wall
+  return unique
+}
 
-  const lastAt = (cover, i) => {
-    for (let j = i - 1; j >= 0; j--) if (wall[j].cover === cover) return j
-    return -Infinity
+// Size a portrait mosaic to the number of distinct covers instead of repeating tiles.
+export function wallGrid(count) {
+  if (count >= WALL) return { cols: 6, rows: 11 }
+  if (count <= 0) return { cols: 6, rows: 11 }
+  if (count === 1) return { cols: 1, rows: 1 }
+  if (count === 2) return { cols: 2, rows: 1 }
+  if (count === 3) return { cols: 3, rows: 1 }
+  let best = { cols: Math.min(6, count), rows: Math.ceil(count / Math.min(6, count)) }
+  let bestScore = -Infinity
+  for (let cols = 2; cols <= Math.min(6, count); cols++) {
+    const rows = Math.ceil(count / cols)
+    const empty = cols * rows - count
+    const tile = (552 - 3 * (cols - 1)) / cols
+    const height = rows * (tile + 3) - 3
+    const portrait = rows >= cols ? 6 : 0
+    const heightScore = height >= 400 && height <= 1100 ? 8 : height < 400 ? height / 50 : -Math.min(16, (height - 1100) / 50)
+    const score = -empty * 15 + heightScore + portrait + Math.min(tile, 200) * 0.12
+    if (score > bestScore) { best = { cols, rows }; bestScore = score }
   }
-  const pick = i => {
-    const left = i % cols !== 0 ? wall[i - 1].cover : ''
-    const above = i >= cols ? wall[i - cols].cover : ''
-    const used = new Set()
-    for (let j = 0; j < i; j++) if (wall[j].cover) used.add(wall[j].cover)
-    const unused = unique.filter(cover => !used.has(cover) && cover !== left && cover !== above)
-    if (unused.length) return unused[0]
-    let best = '', bestScore = -1
-    for (const cover of unique) {
-      if (cover === left || cover === above) continue
-      const score = i - lastAt(cover, i)
-      if (score > bestScore) { best = cover; bestScore = score }
-    }
-    if (best) return best
-    let fallback = unique[0], fallbackScore = -1
-    for (const cover of unique) {
-      const score = i - lastAt(cover, i)
-      if (score > fallbackScore) { fallback = cover; fallbackScore = score }
-    }
-    return fallback
-  }
+  return best
+}
 
-  for (let i = 1; i < WALL; i++) wall[i].cover = pick(i)
-  return wall
+function buildWall(events) {
+  const unique = uniqueCovers(events).slice(0, WALL)
+  if (!unique.length) {
+    return { wall: Array.from({ length: WALL }, (_, i) => ({ cover: '', first: i === 0 })), wallCols: 6 }
+  }
+  const { cols } = wallGrid(unique.length)
+  const firstKey = coverKey(events[0]?.cover || '')
+  const wall = unique.map((cover, i) => ({
+    cover,
+    first: firstKey ? coverKey(cover) === firstKey && !unique.slice(0, i).some(item => coverKey(item) === firstKey) : i === 0,
+  }))
+  if (!wall.some(slot => slot.first) && wall[0]) wall[0].first = true
+  return { wall, wallCols: cols }
 }
 
 // Only display fields are copied. Anything else on the archive (account, raw, cookies) is ignored.
@@ -152,6 +175,7 @@ function sanitizeEvents(archive) {
       ms: Number.isFinite(ms) ? ms : listenMs(date, time),
       play_count: countOf(item.play_count),
       cover: coverUrl(item.cover),
+      ...(albumIdOf(item) ? { album_id: albumIdOf(item) } : {}),
     })
   }
   events.sort((a, b) => a.ms - b.ms || a.song_id.localeCompare(b.song_id) || a.name.localeCompare(b.name))
@@ -181,7 +205,7 @@ function card(event, extra) {
   }
 }
 
-export function posterFrom(events) {
+export function posterFrom(events, extras = {}) {
   const first = events[0]
   const latest = events.at(-1)
   let top = first, topScore = -1
@@ -228,9 +252,11 @@ export function posterFrom(events) {
       value: num(metCount || events.length),
       unit: '首',
       cover: coverOf(metList),
+      portrait: coverUrl(extras.portrait) || '',
+      face: true,
     },
     latest: card(latest, { label: 'LATEST', value: latest.date.slice(5).replace('-', '.'), unit: latest.time }),
-    wall: buildWall(events),
+    ...buildWall(events),
   }
 }
 
@@ -252,10 +278,10 @@ export function shareText(poster) {
 }
 
 // archive: { events } or { songs } from a backup, or a bare event list. Sensitive fields are dropped.
-export function sharePayload(archive) {
+export function sharePayload(archive, extras) {
   const events = sanitizeEvents(archive)
   if (!events.length) return null
-  const poster = posterFrom(events)
+  const poster = posterFrom(events, extras)
   return { text: shareText(poster), poster }
 }
 
@@ -531,10 +557,11 @@ function drawImageCover(ctx, img, x, y, w, h) {
   if (ir > r) { sw = ih * r; sx = (iw - sw) / 2 } else { sh = iw / r; sy = (ih - sh) / 2 }
   ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h)
 }
-function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#14120f', pad = 0 } = {}) {
+function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#14120f', pad = 0, round = false } = {}) {
   ctx.save()
   ctx.beginPath()
-  ctx.rect(x, y, w, h)
+  if (round) ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2)
+  else ctx.rect(x, y, w, h)
   ctx.clip()
   if (img) {
     try {
@@ -596,7 +623,19 @@ function neighborImage(images, wall, index, cols) {
   )
 }
 function drawWall(ctx, poster, images) {
-  const gap = 3, cols = 6, tile = (552 - gap * (cols - 1)) / cols
+  const gap = 3
+  const cols = poster.wallCols || 6
+  const tile = (552 - gap * (cols - 1)) / cols
+  const fieldTile = (552 - gap * 5) / 6
+  const fieldH = (fieldTile + gap) * 11
+  const backdrop = poster.wall.map(slot => slot.cover && images.get(slot.cover)).find(Boolean) || null
+  if (backdrop) {
+    paintCover(ctx, backdrop, -6, -6, 552 + 12, fieldH + 12, {
+      filter: 'saturate(0.42) brightness(0.26) blur(28px)',
+      tone: '#14120f',
+      pad: 24,
+    })
+  }
   poster.wall.forEach((slot, i) => {
     const x = -6 + (i % cols) * (tile + gap)
     const y = -6 + Math.floor(i / cols) * (tile + gap)
@@ -766,8 +805,8 @@ function drawMini(ctx, card, index, images) {
     c.stroke()
     c.restore()
 
-    const img = card.cover ? images.get(card.cover) : null
-    paintCover(c, img, 12, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0' })
+    const img = (card.portrait && images.get(card.portrait)) || (card.cover ? images.get(card.cover) : null)
+    paintCover(c, img, 12, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0', round: Boolean(card.portrait || card.face) })
     const textX = 64, textW = w - textX - 6
     c.textAlign = 'left'
     c.textBaseline = 'top'
@@ -905,7 +944,10 @@ function drawPoster(ctx, poster, images) {
 async function loadCovers(poster, loadImage) {
   const urls = new Set()
   for (const slot of poster.wall || []) if (slot.cover) urls.add(slot.cover)
-  for (const item of [poster.first, poster.mostPlayed, poster.mostMet, poster.latest]) if (item?.cover) urls.add(item.cover)
+  for (const item of [poster.first, poster.mostPlayed, poster.mostMet, poster.latest]) {
+    if (item?.cover) urls.add(item.cover)
+    if (item?.portrait) urls.add(item.portrait)
+  }
   const images = new Map()
   await Promise.all([...urls].map(async url => {
     try {

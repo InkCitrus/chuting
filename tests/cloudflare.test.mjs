@@ -79,6 +79,23 @@ test('song details are trimmed to names and album art before reaching the browse
   const body = await (await handleApi(req('/api/netease', { uid: '1', method: 'song_detail', query: { ids: '7' } }, 'chuting_session=' + token), env, rpc)).json()
   assert.deepEqual(body, { code: 200, songs: [{ id: 7, name: 'n', ar: [{ name: 'a' }], al: { name: 'al', picUrl: 'http://p1.music.126.net/x/1.jpg' } }] })
 })
+test('artist search returns only the name and a sanitized portrait URL', async () => {
+  const env = { SESSION_SECRET: secret }
+  const token = await seal({ account: { uid: '1' }, cookie: { MUSIC_U: 'fake' } }, secret, 'session', 60)
+  const [path, query] = endpoint('artist_search', { s: '甲' })
+  assert.equal(path, '/api/cloudsearch/pc')
+  assert.equal(query.type, 100)
+  const rpc = async (method, q) => {
+    assert.equal(method, 'artist_search')
+    assert.equal(q.s, '甲')
+    return { body: { code: 200, result: { artists: [
+      { name: '甲', id: 9, picUrl: 'http://p2.music.126.net/ok/face.jpg?param=640y300', albumSize: 12, followed: true },
+      { name: '乙', img1v1Url: 'https://p1.music.126.net/x/18686200114669622.jpg' },
+    ] } }, cookie: {} }
+  }
+  const body = await (await handleApi(req('/api/netease', { uid: '1', method: 'artist_search', query: { s: '甲' } }, 'chuting_session=' + token), env, rpc)).json()
+  assert.deepEqual(body, { code: 200, artists: [{ name: '甲', picUrl: 'https://p2.music.126.net/ok/face.jpg' }, { name: '乙' }] })
+})
 test('CSP allows album art only from the NetEase image CDN', async () => {
   const response = await handleApi(new Request(origin + '/api/runtime'), {})
   const csp = response.headers.get('Content-Security-Policy')

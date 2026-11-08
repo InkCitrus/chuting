@@ -131,6 +131,22 @@ export async function handleApi(request, env, upstream = callNetease) {
     }
     // Song details are only used for names and album art: trim ~1–2 KB per song down to what is stored.
     if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })
+    if (body.method === 'artist_search') {
+      const list = result.body.result?.artists || []
+      const placeholder = /\/(18686200114669622|5639395138885805)(\.|$)/
+      return json({
+        code: 200,
+        artists: list.slice(0, 5).map(a => {
+          const name = String(a?.name || '').slice(0, 80)
+          const raw = (typeof a?.picUrl === 'string' && a.picUrl) || (typeof a?.img1v1Url === 'string' ? a.img1v1Url : '')
+          const m = /^(?:https?:)?\/\/(p\d{1,2}\.music\.126\.net)\/([\w\-=./]{1,200})(?:\?.*)?$/.exec(raw)
+          const picUrl = m ? `https://${m[1]}/${m[2]}` : ''
+          const out = { name }
+          if (picUrl && !placeholder.test(picUrl)) out.picUrl = picUrl
+          return out
+        }).filter(a => a.name),
+      })
+    }
     if (body.method === 'song_url') {
       let answer = playable(result.body, body.query?.id)
       // One quieter ask: no file, a preview, or a FLAC / hi-res master. Standard MP3 is the level
