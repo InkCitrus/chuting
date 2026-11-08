@@ -170,7 +170,7 @@ test('a supplied artist portrait is kept on the most-met stub and the album cove
   assert.equal(payload.poster.mostMet.title, '周杰伦')
   assert.equal(payload.poster.mostMet.portrait, 'https://p1.music.126.net/ok/face.jpg')
   assert.equal(payload.poster.mostMet.cover, 'https://p1.music.126.net/ok/c.jpg')
-  assert.equal(payload.poster.mostMet.face, true)
+  assert.equal(payload.poster.mostMet.face, undefined)
 })
 
 test('one song, a missing album, and a missing cover still make a poster', () => {

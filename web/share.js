@@ -253,7 +253,6 @@ export function posterFrom(events, extras = {}) {
       unit: '首',
       cover: coverOf(metList),
       portrait: coverUrl(extras.portrait) || '',
-      face: true,
     },
     latest: card(latest, { label: 'LATEST', value: latest.date.slice(5).replace('-', '.'), unit: latest.time }),
     ...buildWall(events),
@@ -557,11 +556,10 @@ function drawImageCover(ctx, img, x, y, w, h) {
   if (ir > r) { sw = ih * r; sx = (iw - sw) / 2 } else { sh = iw / r; sy = (ih - sh) / 2 }
   ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h)
 }
-function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#14120f', pad = 0, round = false } = {}) {
+function paintCover(ctx, img, x, y, w, h, { filter = '', glyph = '', tone = '#14120f', pad = 0 } = {}) {
   ctx.save()
   ctx.beginPath()
-  if (round) ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2)
-  else ctx.rect(x, y, w, h)
+  ctx.rect(x, y, w, h)
   ctx.clip()
   if (img) {
     try {
@@ -806,7 +804,7 @@ function drawMini(ctx, card, index, images) {
     c.restore()
 
     const img = (card.portrait && images.get(card.portrait)) || (card.cover ? images.get(card.cover) : null)
-    paintCover(c, img, 12, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0', round: Boolean(card.portrait || card.face) })
+    paintCover(c, img, 12, 16, 46, 46, { glyph: card.title, tone: '#e4ddd0' })
     const textX = 64, textW = w - textX - 6
     c.textAlign = 'left'
     c.textBaseline = 'top'

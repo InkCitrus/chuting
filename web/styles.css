@@ -329,13 +329,9 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .hl-slide.is-active { opacity: 1; pointer-events: auto }
 .hl-open { width: 100%; height: 100%; border: 0; padding: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; gap: 26px; border-radius: 22px }
 .hl-art { position: relative; display: block; width: 100%; height: 300px; flex-shrink: 0; transform: perspective(1000px) rotateX(calc(var(--ty) * -8deg)) rotateY(calc(var(--tx) * 10deg)); transition: transform .6s var(--ease) }
-.hl-sleeve, .hl-mosaic { position: absolute; left: 0; top: 0; width: 300px; height: 300px; border-radius: 14px; box-shadow: 0 30px 60px -28px rgb(20 14 8 / .55), 0 0 0 1px rgb(0 0 0 / .04) }
-.hl-portrait {
-  position: absolute; left: 0; top: 0; width: 300px; height: 300px; border-radius: 50%; overflow: hidden;
-  display: grid; place-items: center;
-  box-shadow: 0 30px 60px -28px rgb(20 14 8 / .55), 0 0 0 1px rgb(255 255 255 / .08), 0 0 0 6px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.hl-portrait .cover-img, .hl-portrait-glyph { width: 100%; height: 100%; object-fit: cover; border-radius: 50% }
+.hl-sleeve, .hl-mosaic, .hl-portrait { position: absolute; left: 0; top: 0; width: 300px; height: 300px; border-radius: 14px; box-shadow: 0 30px 60px -28px rgb(20 14 8 / .55), 0 0 0 1px rgb(0 0 0 / .04) }
+.hl-portrait { overflow: hidden; display: grid; place-items: center }
+.hl-portrait .cover-img, .hl-portrait-glyph { width: 100%; height: 100%; object-fit: cover }
 .hl-portrait-glyph { display: grid; place-items: center; font-family: var(--serif); font-weight: 900; font-size: 120px; color: rgb(255 255 255 / .9) }
 .hl-sleeve { z-index: 1 }
 .hl-sleeve .glyph { font-size: 120px }
@@ -662,8 +658,7 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hl-stage { height: 150px }
   .hl-open { flex-direction: row; align-items: center; gap: 18px }
   .hl-art { width: 150px; height: 150px; transform: none }
-  .hl-sleeve, .hl-mosaic { width: 132px; height: 132px; top: 9px; border-radius: 10px }
-  .hl-portrait { width: 132px; height: 132px; top: 9px; box-shadow: 0 18px 36px -20px rgb(20 14 8 / .55), 0 0 0 1px rgb(255 255 255 / .08), 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent) }
+  .hl-sleeve, .hl-mosaic, .hl-portrait { width: 132px; height: 132px; top: 9px; border-radius: 10px }
   .hl-portrait-glyph { font-size: 52px }
   .hl-sleeve .glyph { font-size: 52px }
   .hl-cell .glyph { font-size: 24px }
@@ -718,8 +713,7 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hl-stage { height: 128px }
   .hl-open { gap: 14px }
   .hl-art { width: 118px; height: 118px }
-  .hl-sleeve, .hl-mosaic { width: 104px; height: 104px; top: 7px }
-  .hl-portrait { width: 104px; height: 104px; top: 7px; box-shadow: 0 16px 32px -18px rgb(20 14 8 / .5), 0 0 0 1px rgb(255 255 255 / .08), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent) }
+  .hl-sleeve, .hl-mosaic, .hl-portrait { width: 104px; height: 104px; top: 7px }
   .hl-portrait-glyph { font-size: 42px }
   .hl-disc { width: 94px; height: 94px; left: 5px; top: 12px }
   .hl-slide.is-active .hl-disc { transform: translateX(20px) }
@@ -779,19 +773,13 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
     flex-shrink: 0;
   }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-sleeve,
-  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-mosaic {
-    width: 200px;
-    height: 200px;
-    top: 0;
-    left: 0;
-    border-radius: 12px;
-  }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-mosaic,
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-portrait {
     width: 200px;
     height: 200px;
     top: 0;
     left: 0;
-    box-shadow: 0 22px 48px -24px rgb(20 14 8 / .55), 0 0 0 1px rgb(255 255 255 / .08), 0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent);
+    border-radius: 12px;
   }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-portrait-glyph { font-size: 84px }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-sleeve .glyph { font-size: 84px }
