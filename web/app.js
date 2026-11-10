@@ -1211,10 +1211,14 @@ function setText(el, text) {
   if (el && el.textContent !== text) el.textContent = text
 }
 function detectTravelQuality() {
+  // CriOS is Chrome-branded WebKit. It must not be treated as desktop Chrome:
+  // a phone-sized touch viewport should ignore a Chromium-style deviceMemory
+  // of 4 that would otherwise force the sparse lite tunnel.
+  const phoneLike = (Number(navigator.maxTouchPoints) > 0) && Math.min(innerWidth || 0, innerHeight || 0) <= 520
   return travelQuality({
     reducedMotion: reduced.matches,
     hardwareConcurrency: navigator.hardwareConcurrency,
-    deviceMemory: navigator.deviceMemory
+    deviceMemory: phoneLike ? undefined : navigator.deviceMemory
   })
 }
 function syncTravelStageLayout() {
@@ -1612,16 +1616,24 @@ function paintArriveNote(result) {
   const note = $('arriveNote')
   if (!note) return
   if (!result) return
-  if (result.ok) { note.hidden = true; note.textContent = ''; return }
+  if (result.ok) {
+    note.hidden = true; note.textContent = ''; note.classList.remove('is-wait-play')
+    $('arriveArt')?.classList.remove('is-wait-play')
+    return
+  }
   const reason = result.reason || ''
   const raw = result.error || player?.note || ''
-  const msg = reason === 'login' || raw === '扫码登录后就能听。'
+  const blocked = result.blocked || reason === 'blocked'
+  const msg = blocked ? '轻点封面即可播放'
+    : reason === 'login' || raw === '扫码登录后就能听。'
     ? '扫码登录后，穿越时会把歌一起带上。'
     : reason === 'offline' || raw === '没网，先不放歌了。'
       ? '没网，先不放歌了。'
       : raw || '这次没能把歌一起带回来。'
   note.textContent = msg
   note.hidden = !msg
+  note.classList.toggle('is-wait-play', blocked)
+  $('arriveArt')?.classList.toggle('is-wait-play', blocked)
 }
 function watchArriveNote(event) {
   if (travel.play && typeof travel.play.then === 'function') {
@@ -1658,7 +1670,8 @@ function switchArrival(item, { play = true } = {}) {
   travel.event = item
   travel.toMs = item.first_listen_ms || travel.toMs
   if (play) {
-    player?.unlock?.()
+    // play() starts in this tap. Calling unlock() first would consume the
+    // iOS user gesture and make the later src+play() fail with NotAllowedError.
     travel.play = player?.play?.(item)
   } else {
     travel.play = null
@@ -1806,7 +1819,6 @@ function startTravel(event, { source = 'random' } = {}) {
   overlay?.classList.toggle('is-going', !quiet)
   paintTravelClock(quiet ? travel.toMs : travel.fromMs)
   if (overlay && !overlay.open) openModal(overlay)
-  player?.unlock?.()
   const same = player?.current?.song_id === event.song_id && player?.playing
   if (!same) {
     player?.duck?.(240)
@@ -2407,6 +2419,15 @@ $('travelOverlay')?.addEventListener('cancel', e => {
   else returnToPresent()
 })
 $('travelStage')?.addEventListener('click', () => { if (travel.phase === 'going' || travel.phase === 'waiting') skipTravel() })
+function resumeBlockedTravelPlay() {
+  if (travel.phase !== 'arrive' || !travel.event) return
+  const art = $('arriveArt')
+  if (!art?.classList.contains('is-wait-play') && !$('arriveNote')?.classList.contains('is-wait-play')) return
+  travel.play = player?.play?.(travel.event)
+  if (travel.play?.then) travel.play.then(result => { if (travel.event) paintArriveNote(result) })
+}
+$('arriveArt')?.addEventListener('click', resumeBlockedTravelPlay)
+$('arriveNote')?.addEventListener('click', resumeBlockedTravelPlay)
 $('locateBtn')?.addEventListener('click', () => locateInTimeline(state.view[state.current] || player?.current))
 $('miniLocate')?.addEventListener('click', () => locateInTimeline(player?.current))
 $('prevSong').addEventListener('click', () => stepSong(-1))
@@ -2504,9 +2525,10 @@ player = createPlayer({
   coverFor: event => (event.cover ? px => coverSize(event.cover, px) : null),
   onEnded: () => playRelative(1),
   onChange: event => followTravelPlayer(event),
-  onUnplayable: () => {
+  onUnplayable: (_event, result) => {
     if (!travel.open) return
     if (travel.phase !== 'arrive' && travel.phase !== 'going' && travel.phase !== 'waiting') return
+    if (result?.blocked || result?.reason === 'blocked') return
     if (travel.skips >= 8) return
     travel.skips += 1
     playRelative(1)

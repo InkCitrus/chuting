@@ -83,8 +83,7 @@ export function audioHosts(url) {
   } catch { return [url] }
 }
 export function playErrorMessage(err, _mediaError, answer) {
-  if (err?.name === 'NotAllowedError') return ''
-  if (err?.name === 'AbortError') return null
+  if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') return null
   if (answer && !answer.url) return PLAYER_LINES[answer.reason] || PLAYER_LINES.unavailable
   if (answer?.reason === 'rights' || answer?.reason === 'copyright') return PLAYER_LINES[answer.reason]
   if (answer?.trial) return PLAYER_LINES.rights
@@ -95,7 +94,9 @@ export function playErrorMessage(err, _mediaError, answer) {
 export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onChange, onUnplayable }) {
   const audio = new Audio()
   audio.preload = 'auto'
-  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, offline: false, seeking: false, replacing: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0 }
+  audio.playsInline = true
+  try { audio.setAttribute('playsinline', '') } catch {}
+  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, blocked: false, offline: false, seeking: false, replacing: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0 }
   let fadeRaf = 0
   let mediaEpoch = 0
   let recovery = null
@@ -120,9 +121,10 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
   }
   function status() {
     return {
-      ok: Boolean(state.answer?.url) && !state.error,
+      ok: Boolean(state.answer?.url) && !state.error && !state.blocked,
       error: state.error || '',
-      reason: state.answer?.reason || (state.error ? 'failed' : ''),
+      reason: state.blocked ? 'blocked' : (state.answer?.reason || (state.error ? 'failed' : '')),
+      blocked: Boolean(state.blocked),
       trial: Boolean(state.answer?.trial)
     }
   }
@@ -223,8 +225,21 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       throw err
     }
   }
+  function markBlocked() {
+    state.blocked = true
+    state.failed = false
+    state.error = ''
+    state.loading = false
+    state.replacing = false
+    state.pendingFade = 0
+    audio.muted = false
+    applyGain(1)
+    render()
+    return status()
+  }
   function finish(gen, err) {
     if (gen !== state.gen) return stale()
+    if (err?.name === 'NotAllowedError') return markBlocked()
     const message = playErrorMessage(err, audio.error, state.answer)
     if (message == null) return status()
     state.failed = true
@@ -272,7 +287,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       return { ok: false, error: PLAYER_LINES[state.offline] || PLAYER_LINES.offline, reason: state.offline, trial: false }
     }
     const gen = ++state.gen
-    adopt(event); state.answer = null; state.error = ''; state.failed = false; state.loading = true; state.retried = Boolean(fallback)
+    adopt(event); state.answer = null; state.error = ''; state.failed = false; state.blocked = false; state.loading = true; state.retried = Boolean(fallback)
     // Keep any muted/primed playback alive until the new URL arrives so a
     // play() started in a tap gesture still counts after the network wait.
     state.replacing = true
@@ -313,9 +328,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
         applyGain(1)
       }
     } catch (err) {
-      if (err?.name === 'NotAllowedError' && gen === state.gen) {
-        state.pendingFade = 0; audio.muted = false; state.error = ''; state.failed = false; state.loading = false; state.replacing = false; render(); return status()
-      }
+      if (err?.name === 'NotAllowedError' && gen === state.gen) return markBlocked()
       if (gen !== state.gen) return recovery || stale()
       if (err?.name === 'AbortError') return recovery || status()
       if (state.answer?.url && audio.src !== firstSrc) return recovery || status()
@@ -333,6 +346,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     if (!state.answer?.url || state.error || state.failed) return load(state.event)
     if (audio.paused) audio.play().catch(err => {
       if (err?.name === 'AbortError') return
+      if (err?.name === 'NotAllowedError') { markBlocked(); return }
       settle(state.gen, err)
     })
     else audio.pause()
@@ -351,7 +365,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       state.loading = false; audio.muted = false; applyGain(1); render()
     }).catch(err => {
       if (gen !== state.gen) return stale()
-      if (err?.name === 'NotAllowedError') { state.loading = false; render(); return status() }
+      if (err?.name === 'NotAllowedError') return markBlocked()
       if (err?.name === 'AbortError' || audio.src !== src) return recovery || status()
       return settle(gen, err)
     })
@@ -437,9 +451,13 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     },
     unlock() {
       try {
+        audio.playsInline = true
+        try { audio.setAttribute('playsinline', '') } catch {}
+        const src = (audio.getAttribute && audio.getAttribute('src')) || audio.src || ''
+        // A dummy silent clip consumes the user gesture and ends immediately.
+        // Only prime an element that already has a real source.
+        if (!src || src.startsWith('data:')) return
         audio.muted = true
-        const src = (audio.getAttribute && audio.getAttribute('src')) || audio.src
-        if (!src) audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
         const p = audio.play()
         if (p && p.catch) p.catch(() => {})
       } catch {}
