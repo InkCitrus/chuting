@@ -464,7 +464,7 @@ function renderStatus() {
   line.hidden = !has || (!run && !stats.discovered)
   line.dataset.status = run ? run.status : 'idle'
   $('syncMessage').textContent = state.offline ? '没网了，先翻翻看'
-    : run ? run.phase + (run.error && !running() ? ` · ${run.error}` : '')
+    : run ? run.phase + (run.error && !running() && !run.busy ? ` · ${run.error}` : '')
     : state.local && !online ? '从备份里来的 · 扫码接着同步' : '还没有同步过'
   $('pauseButton').hidden = !running()
   const total = running() && run.total ? run.total : stats.discovered || 1
@@ -2330,7 +2330,16 @@ async function pauseSync() {
 function syncFinished(status) {
   const run = status.run || {}
   if (run.status === 'completed' && run.found !== undefined) toast(run.found ? `同步好了，这次新找到 ${n(run.found)} 首初听` : '同步好了，没有新的初听')
+  else if (run.status === 'failed' && run.busy) toast(run.error)
   else if (run.status === 'failed' && run.error) toast(run.error, 'error')
+  scheduleResume(run)
+}
+// A sync stopped because everything was busy carries resume_ms: continue then, quietly, while the page is open.
+let resumeTimer
+function scheduleResume(run) {
+  clearTimeout(resumeTimer)
+  if (!run?.busy || run.status !== 'failed' || !run.resume_ms) return
+  resumeTimer = setTimeout(() => { if (!running() && !state.offline) startSync({ quiet: true }) }, Math.max(1000, run.resume_ms - Date.now()))
 }
 // Opening the page quietly continues where the archive left off (and fills in missing album art).
 async function autoSync() {
@@ -2338,6 +2347,7 @@ async function autoSync() {
   state.autoTried = true
   const stats = state.status?.stats || {}, run = state.status?.run
   const stale = !run?.updated_ms || Date.now() - run.updated_ms > 6 * 3600000
+  if (run?.busy && run.status === 'failed' && run.resume_ms > Date.now()) return scheduleResume(run)
   if (settings.auto && (pendingNow(stats) > 0 || run?.status === 'paused' || stale)) return startSync({ quiet: true })
   if (stats.missing_covers > 0) return startSync({ quiet: true, covers_only: true })
 }
