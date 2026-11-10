@@ -91,3 +91,9 @@ node --check music_calendar/provider.cjs
 测试走模拟接口和临时库，不碰真实 Cookie。
 
 [产品范围](docs/PRODUCT.md) · [接口验证](docs/API_FINDINGS.md) · [实现说明](docs/ARCHITECTURE.md)
+
+## License
+
+本项目以 [Apache-2.0](LICENSE) 许可发布。
+
+Copyright 2026 InkCitrus
