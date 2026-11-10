@@ -187,6 +187,25 @@ export function tileLayout(i, n = TRAVEL_TILES, faceCounts = TRAVEL_FACE_COUNTS)
   return { ring, face, col: rest, rings, across: counts[face], perRing }
 }
 
+// Opacity and shade as a function of depth only. Piecewise linear in z; the
+// knots are listed by depthKnots so compositor keyframes can hit them exactly.
+export function depthLook(z, layout = null, length = null) {
+  const zMin = layout?.zMin ?? -1640
+  const len = length ?? (layout?.rings ?? TRAVEL_RINGS) * (layout?.spacing ?? 310)
+  const nearness = Math.min(1, Math.max(0, (z - zMin) / Math.max(1, len - 220)))
+  const brightness = 0.2 + 0.8 * nearness
+  let opacity = 1
+  // Hide a card only when its center actually crosses the near plane
+  // (approaches the camera at `perspective`). Earlier fades and edge-aware
+  // hides removed the large near and corner covers that filled the frame.
+  const cam = layout?.perspective ?? 900
+  const nearHide = cam - 40
+  if (z >= nearHide) opacity = 0
+  else if (z > nearHide - 80) opacity = Math.max(0, (nearHide - z) / 80)
+  else if (z < zMin + 90) opacity = 0.28 + 0.72 * Math.max(0, (z - zMin) / 90)
+  return { opacity, brightness }
+}
+
 // Rectangular tube: more tiles on floor/ceiling than on the side walls so a
 // wide frame fills a landscape screen. Rings wrap along Z to stay dense.
 export function cardPose(i, n, t, reverse = false, layout = null) {
@@ -215,17 +234,7 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
   else if (face === 2) { y = -wallY; x = offset * pitchX; rotateX = -tiltX }
   else { y = wallY; x = offset * pitchX; rotateX = tiltX }
 
-  const nearness = Math.min(1, Math.max(0, (z - zMin) / Math.max(1, length - 220)))
-  const brightness = 0.2 + 0.8 * nearness
-  let opacity = 1
-  // Hide a card only when its center actually crosses the near plane
-  // (approaches the camera at `perspective`). Earlier fades and edge-aware
-  // hides removed the large near and corner covers that filled the frame.
-  const cam = layout?.perspective ?? 900
-  const nearHide = cam - 40
-  if (z >= nearHide) opacity = 0
-  else if (z > nearHide - 80) opacity = Math.max(0, (nearHide - z) / 80)
-  else if (z < zMin + 90) opacity = 0.28 + 0.72 * Math.max(0, (z - zMin) / 90)
+  const { opacity, brightness } = depthLook(z, layout, length)
   return { x, y, z, opacity, rotate: 0, rotateX, rotateY, scale: 1, blur: 0, brightness, face, ring, side: face < 2 ? (face === 0 ? -1 : 1) : 0 }
 }
 
@@ -243,6 +252,137 @@ export function cardTransform(pose, cam = {}) {
   const lead = ox || oy ? `translate3d(${f(ox)}px, ${f(oy)}px, 0px) ` : ''
   return `${lead}perspective(${p}px) translate3d(${f(pose.x - ox)}px, ${f(pose.y - oy)}px, ${f(pose.z)}px) ` +
     `rotateX(${Number(pose.rotateX) || 0}deg) rotateY(${Number(pose.rotateY) || 0}deg) scale(${(Number(pose.scale) || 1).toFixed(4)})`
+}
+
+// ---- Compositor-driven flight -------------------------------------------
+// The tunnel motion is deterministic: a card's x / y / tilt never change, and
+// its z is linear in the eased progress p (wrapping once per lap). So the
+// whole flight of a card is a short list of keyframes, played by the browser's
+// compositor instead of 120 style writes per frame from JS.
+export const TRAVEL_SHIFT = 2.25 // laps of the tunnel per flight, as in cardPose
+const EASE_KNOTS = [0.9 / 3.5, 2.1 / 3.5] // kinks inside easeTravel
+
+export function travelProgress(u, reverse = false) {
+  const p = easeTravel(u)
+  return reverse ? 1 - p : p
+}
+
+function slopeAt(u, reverse, side) {
+  const h = 1e-5
+  const a = side > 0 ? u : u - h
+  const b = side > 0 ? u + h : u
+  return (travelProgress(Math.min(1, b), reverse) - travelProgress(Math.max(0, a), reverse)) / Math.max(1e-12, Math.min(1, b) - Math.max(0, a))
+}
+
+// Raw time u at which the flight reaches progress p (progress is monotonic).
+function timeForProgress(p, reverse) {
+  let lo = 0, hi = 1
+  for (let k = 0; k < 48; k++) {
+    const mid = (lo + hi) / 2
+    const at = travelProgress(mid, reverse)
+    if (reverse ? at > p : at < p) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+function geometry(layout, ringCount) {
+  const spacing = layout?.spacing ?? 310
+  const rings = ringCount || layout?.rings || TRAVEL_RINGS
+  const length = rings * spacing
+  const zMin = layout?.zMin ?? -1640
+  return { spacing, rings, length, zMin, shift: length * TRAVEL_SHIFT }
+}
+
+// Cubic Hermite segment written as a CSS easing: x(s) = s, so the curve is
+// y(t) with the exact start/end slopes of the eased progress.
+function hermite(m0, m1) {
+  const f = n => (Math.round(n * 1e4) / 1e4).toString()
+  return `cubic-bezier(0.3333, ${f(m0 / 3)}, 0.6667, ${f(1 - m1 / 3)})`
+}
+
+export function cardKeyframes(i, n, layout = null, cam = {}, { reverse = false, knots = 8 } = {}) {
+  const base = cardPose(i, n, 0, false, layout)
+  // Ring count comes from the cards actually built, exactly as in cardPose.
+  const { spacing, length, zMin, shift } = geometry(layout, tileLayout(i, n, layout?.faceCounts).rings)
+  const ring = base.ring
+  const nearHide = (layout?.perspective ?? 900) - 40
+  // Depth knots, as offsets inside one lap: wrap, far fade, shade, near fade.
+  const local = [0, 90, length - 220, nearHide - 80 - zMin, nearHide - zMin].filter(w => w >= 0 && w < length)
+  const times = new Set([0, 1, ...EASE_KNOTS])
+  for (let k = 1; k < knots; k++) times.add(k / knots)
+  const wraps = new Set()
+  const lapLo = Math.floor((ring * spacing) / length) - 1
+  const lapHi = Math.ceil((ring * spacing + shift) / length) + 1
+  for (let lap = lapLo; lap <= lapHi; lap++) {
+    for (const w of local) {
+      const p = (lap * length + w - ring * spacing) / shift
+      if (!(p > 1e-9 && p < 1 - 1e-9)) continue
+      const u = timeForProgress(p, reverse)
+      times.add(u)
+      if (w === 0) wraps.add(u)
+    }
+  }
+  const list = [...times].sort((a, b) => a - b)
+  const look = (z) => {
+    const { opacity, brightness } = depthLook(z, layout, length)
+    const pose = { ...base, z }
+    return {
+      transform: cardTransform(pose, cam),
+      opacity: Number(opacity.toFixed(3)),
+      shade: Number(Math.max(0, Math.min(1, 1 - brightness)).toFixed(3))
+    }
+  }
+  const zAt = (p) => {
+    const unwrapped = ring * spacing + p * shift
+    return zMin + ((unwrapped % length) + length) % length
+  }
+  const frames = []
+  for (const u of list) {
+    const p = travelProgress(u, reverse)
+    if (wraps.has(u)) {
+      // Two keyframes at the same offset: the card jumps from one end of the
+      // tube to the other, exactly as the modulo in cardPose does.
+      const goingIn = reverse ? -1 : 1
+      frames.push({ u, ...look(goingIn > 0 ? zMin + length - 1e-6 : zMin) })
+      frames.push({ u, ...look(goingIn > 0 ? zMin : zMin + length - 1e-6) })
+    } else {
+      frames.push({ u, ...look(zAt(p)) })
+    }
+  }
+  // Per-segment easing: properties are affine in p inside a segment, so the
+  // segment's own progress is the normalised eased progress.
+  for (let k = 0; k < frames.length - 1; k++) {
+    const a = frames[k], b = frames[k + 1]
+    const pa = travelProgress(a.u, reverse), pb = travelProgress(b.u, reverse)
+    if (b.u - a.u < 1e-9 || Math.abs(pb - pa) < 1e-12) { a.easing = 'linear'; continue }
+    const span = (b.u - a.u) / (pb - pa)
+    a.easing = hermite(slopeAt(a.u, reverse, 1) * span, slopeAt(b.u, reverse, -1) * span)
+  }
+  const card = frames.map(f => ({ offset: f.u, transform: f.transform, opacity: f.opacity, easing: f.easing || 'linear' }))
+  const shade = frames.map(f => ({ offset: f.u, opacity: f.shade, easing: f.easing || 'linear' }))
+  return { card, shade, ring }
+}
+
+// Smooth one-off curves (hero growth, flash, bar) as linearly interpolated
+// keyframes over raw time. 90 samples keep every step under ~40 ms of flight.
+export function sampleTrack(fn, samples = 90) {
+  const n = Math.max(2, Math.round(samples))
+  const out = []
+  for (let k = 0; k <= n; k++) {
+    const u = k / n
+    out.push({ offset: u, ...fn(u), easing: 'linear' })
+  }
+  return out
+}
+
+// Paint order for the compositor path. Rings keep their relative order
+// except when one wraps, so a ring's z-index changes only at its own wraps
+// (a few writes per flight) instead of every frame.
+export function ringDepthIndex(ring, p, layout = null, ringCount = 0) {
+  const { spacing, rings, length, shift } = geometry(layout, ringCount)
+  const lap = Math.floor((ring * spacing + p * shift) / length + 1e-9)
+  return ring - lap * rings + 5 * rings + 1
 }
 
 // Paint order without a 3D context: farther cards stack lower. Quantised to

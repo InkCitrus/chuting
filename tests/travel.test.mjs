@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, travelQuality, cardTransform, cardDepthIndex, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, travelQuality, cardTransform, cardDepthIndex, cardKeyframes, ringDepthIndex, travelProgress, depthLook, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -264,4 +264,73 @@ test('cardDepthIndex paints far rings under near rings and only changes a few ti
   assert.ok(changes <= 9)
   assert.ok(cardDepthIndex(layout.zMin + layout.spacing, layout) > cardDepthIndex(layout.zMin, layout))
   assert.ok(cardDepthIndex(-1e6, layout) >= 1)
+})
+
+
+// Evaluate WAAPI keyframes the way a browser does: find the segment, apply its
+// cubic-bezier easing, interpolate numbers inside translate3d / opacity.
+function bezierY(easing, x) {
+  if (easing === 'linear') return x
+  const [x1, y1, x2, y2] = easing.match(/-?[\d.]+/g).map(Number)
+  let lo = 0, hi = 1
+  for (let k = 0; k < 60; k++) {
+    const s = (lo + hi) / 2
+    const bx = 3 * (1 - s) ** 2 * s * x1 + 3 * (1 - s) * s * s * x2 + s ** 3
+    if (bx < x) lo = s; else hi = s
+  }
+  const s = (lo + hi) / 2
+  return 3 * (1 - s) ** 2 * s * y1 + 3 * (1 - s) * s * s * y2 + s ** 3
+}
+const zOf = transform => Number(transform.match(/translate3d\([^)]*?,[^)]*?,\s*(-?[\d.]+)px\)\s*rotateX/)[1])
+function sample(frames, u, key) {
+  let k = 0
+  while (k < frames.length - 2 && frames[k + 1].offset <= u) k++
+  const a = frames[k], b = frames[k + 1]
+  if (b.offset - a.offset < 1e-12) return key(b)
+  const y = bezierY(a.easing, (u - a.offset) / (b.offset - a.offset))
+  return key(a) + (key(b) - key(a)) * y
+}
+
+test('compositor keyframes reproduce cardPose depth, opacity and shade through the whole flight', () => {
+  for (const [w, h] of [[390, 664], [1280, 800]]) {
+    for (const reverse of [false, true]) {
+      const layout = travelStageLayout(w, h, 'full')
+      const n = layout.tiles
+      let worstZ = 0, worstO = 0, worstS = 0
+      for (const i of [0, 7, 21, 45, n - 1]) {
+        const { card, shade } = cardKeyframes(i, n, layout, { perspective: layout.perspective }, { reverse })
+        assert.equal(card[0].offset, 0); assert.equal(card.at(-1).offset, 1)
+        assert.ok(card.length < 40, `few keyframes (${card.length})`)
+        for (let k = 1; k < card.length; k++) assert.ok(card[k].offset >= card[k - 1].offset)
+        for (let u = 0.0005; u < 1; u += 0.0037) {
+          const want = cardPose(i, n, travelProgress(u, reverse) * (reverse ? -1 : 1) + (reverse ? 1 : 0), reverse, layout)
+          const z = sample(card, u, f => zOf(f.transform))
+          // Skip the instant of a wrap, where both ends are correct values.
+          if (Math.abs(z - want.z) > 700) continue
+          worstZ = Math.max(worstZ, Math.abs(z - want.z))
+          worstO = Math.max(worstO, Math.abs(sample(card, u, f => f.opacity) - want.opacity))
+          worstS = Math.max(worstS, Math.abs(sample(shade, u, f => f.opacity) - (1 - want.brightness)))
+        }
+      }
+      assert.ok(worstZ < 2.5, `${w}x${h} reverse=${reverse}: z off by ${worstZ.toFixed(2)}px`)
+      assert.ok(worstO < 0.02, `opacity off by ${worstO}`)
+      assert.ok(worstS < 0.01, `shade off by ${worstS}`)
+    }
+  }
+})
+
+test('ringDepthIndex only changes when a ring wraps, and nearer rings always paint on top', () => {
+  const layout = travelStageLayout(390, 664, 'full')
+  const rings = layout.rings
+  let changes = 0, prev = null
+  for (let p = 0; p <= 1; p += 0.0005) {
+    const idx = Array.from({ length: rings }, (_, r) => ringDepthIndex(r, p, layout))
+    const zs = Array.from({ length: rings }, (_, r) => cardPose(r * 20, layout.tiles, p, false, layout).z)
+    for (let a = 0; a < rings; a++) for (let b = 0; b < rings; b++) if (zs[a] > zs[b] + 1) assert.ok(idx[a] > idx[b])
+    assert.ok(idx.every(v => v >= 1))
+    if (prev) changes += idx.filter((v, r) => v !== prev[r]).length
+    prev = idx
+  }
+  assert.ok(changes <= Math.ceil(rings * 2.25) + rings, `z-index writes per flight: ${changes}`)
+  assert.deepEqual(depthLook(layout.zMin, layout), { opacity: 0.28, brightness: 0.2 })
 })
