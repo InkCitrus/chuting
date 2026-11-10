@@ -32,6 +32,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build:pages
+        env:
+          # Optional: comma-separated https origins of the fallback proxies (repository Actions variable).
+          CHUTING_FALLBACK_ORIGINS: ${{ vars.CHUTING_FALLBACK_ORIGINS }}
 
   deploy:
     name: Deploy production
@@ -64,6 +67,9 @@ jobs:
           fi
       - run: npm ci
       - run: npm run build:pages
+        env:
+          # Optional: comma-separated https origins of the fallback proxies (repository Actions variable).
+          CHUTING_FALLBACK_ORIGINS: ${{ vars.CHUTING_FALLBACK_ORIGINS }}
       - name: Prepare Pages project and runtime key
         run: node scripts/configure-pages.mjs
         env:

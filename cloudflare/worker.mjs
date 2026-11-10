@@ -1,12 +1,75 @@
 import QRCode from 'qrcode'
 import { ApiError, callNetease } from './netease.mjs'
-import { seal, unseal, getSession, sessionCookie } from './session.mjs'
+import { seal, unsealAny, getSession, sessionCookie, sealingSecret, relayToken } from './session.mjs'
 
 export const securityHeaders = {
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*.music.126.net; media-src 'self' https://*.music.126.net https://*.vod.126.net; connect-src 'self' https://*.music.126.net https://*.vod.126.net; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 }
 function json(body, status = 200, extra = {}) { return Response.json(body, { status, headers: { ...securityHeaders, 'Cache-Control': 'no-store', ...extra } }) }
+// The page's own origin is always accepted; ALLOWED_ORIGINS lists the page origin(s) a fallback proxy serves.
+export function allowedOrigin(origin, url, env = {}) {
+  if (!origin) return false
+  if (origin === url.origin) return true
+  return String(env.ALLOWED_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean).includes(origin)
+}
+// Shared edge cache, for catalogue data only (identical for every account). Keys never contain a cookie,
+// uid or session; per-account methods (first listen, likes, records, playlists, song URLs, login) never use it.
+const CACHE_TTL = { song_detail: 86400, artist_search: 7 * 86400 }
+function edgeCache(cache) {
+  if (cache !== undefined) return cache
+  try { return globalThis.caches?.default || null } catch { return null }
+}
+export function cacheKey(url, method, query = {}) {
+  if (method === 'song_detail') {
+    const ids = [...new Set(String(query.ids || '').split(','))].filter(x => /^[1-9]\d{0,17}$/.test(x)).sort()
+    return ids.length ? `${url.origin}/__edge-cache/v1/song_detail?ids=${ids.join(',')}` : null
+  }
+  if (method === 'artist_search') {
+    const text = String(query.s || '').normalize('NFKC').trim().toLowerCase().slice(0, 80)
+    return text ? `${url.origin}/__edge-cache/v1/artist_search?s=${encodeURIComponent(text)}` : null
+  }
+  return null
+}
+async function cached(cache, key) {
+  if (!cache || !key) return null
+  try { const hit = await cache.match(key); return hit ? await hit.json() : null } catch { return null }
+}
+async function remember(cache, key, method, body) {
+  if (!cache || !key) return
+  try { await cache.put(key, Response.json(body, { headers: { 'Cache-Control': `public, max-age=${CACHE_TTL[method]}` } })) } catch {}
+}
+// Cloud-drive uploads (pc set, or t 1/2) are one account's private files; a batch holding one is not cached.
+export function publicSongs(songs, ids) {
+  const list = songs || []
+  return list.length === new Set(ids).size && list.every(s => s && !s.pc && ![1, 2].includes(Number(s.t)))
+}
+// Several first-listen lookups in one Functions request: each is still a separate NetEase call made with
+// this session only, so nothing is shared, but the page spends 1 request on up to BATCH_MAX songs.
+export const BATCH_MAX = 20
+const BATCH_LANES = 2
+async function firstListenBatch(query, session, upstream) {
+  const ids = Array.isArray(query.ids) ? query.ids.map(String) : []
+  if (!ids.length || ids.length > BATCH_MAX || new Set(ids).size !== ids.length || !ids.every(x => /^[1-9]\d{0,17}$/.test(x))) throw new ApiError(`一次最多查询 ${BATCH_MAX} 首初听`, 400)
+  const results = []
+  let next = 0, throttled = 0, expired = null
+  await Promise.all(Array.from({ length: Math.min(BATCH_LANES, ids.length) }, async () => {
+    while (next < ids.length && !throttled && !expired) {
+      const id = ids[next++]
+      try { results.push({ id, body: (await upstream('music_first_listen_info', { id }, session.cookie, session.account.uid)).body }) }
+      catch (error) {
+        const code = error instanceof ApiError ? error.code : 502
+        // Risk control on this route: stop asking at once; the unanswered songs simply stay pending.
+        if (code === 429 || code === 403) { throttled = code; continue }
+        if (code === 301 || code === 401) { expired = error; continue }
+        results.push({ id, error: error instanceof ApiError ? error.message : '网易接口暂时没有返回有效结果', code })
+      }
+    }
+  }))
+  if (expired) throw expired
+  if (throttled && !results.length) throw new ApiError('接口请求受限，请稍后再同步', throttled)
+  return { code: 200, results, ...(throttled ? { throttled } : {}) }
+}
 async function input(request) {
   if (request.headers.get('Content-Type')?.split(';')[0] !== 'application/json') throw new ApiError('需要 JSON 请求', 415)
   const reader = request.body?.getReader()
@@ -194,25 +257,26 @@ async function recoverCloudAudio(answer, query, session, upstream) {
   return answer
 }
 // Dependency injection is used by tests, never controlled by HTTP input.
-export async function handleApi(request, env, upstream = callNetease) {
+export async function handleApi(request, env, upstream = callNetease, cache) {
   const url = new URL(request.url)
   try {
-    if (url.pathname === '/api/runtime' && request.method === 'GET') return json({ storage: 'indexeddb', configured: Boolean(env.SESSION_SECRET?.length >= 32) })
+    const secret = sealingSecret(env)
+    if (url.pathname === '/api/runtime' && request.method === 'GET') return json({ storage: 'indexeddb', configured: Boolean(secret) })
     if (request.method !== 'POST') return json({ error: '需要 POST 请求' }, 405)
-    if (request.headers.get('Origin') !== url.origin) return json({ error: '不接受其他网站的请求' }, 403)
+    if (!allowedOrigin(request.headers.get('Origin'), url, env)) return json({ error: '不接受其他网站的请求' }, 403)
     if (url.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return json({ error: '登录需要 HTTPS' }, 403)
-    if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32) return json({ error: '部署者尚未配置 SESSION_SECRET' }, 503)
+    if (!secret) return json({ error: '部署者尚未配置 SESSION_SECRET' }, 503)
     const body = await input(request)
     if (url.pathname === '/api/auth/key') {
       const { body: result } = await upstream('qr_key', {}, {})
       const key = result.unikey
       if (!key || typeof key !== 'string') throw new ApiError('暂时无法创建登录二维码', 503)
       const qrurl = `https://music.163.com/login?codekey=${encodeURIComponent(key)}`
-      return json({ ticket: await seal({ key }, env.SESSION_SECRET, 'qr', 180),
+      return json({ ticket: await seal({ key }, secret, 'qr', 180),
         image: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(await QRCode.toString(qrurl, { type: 'svg', margin: 2, width: 240 })) })
     }
     if (url.pathname === '/api/auth/check') {
-      const ticket = await unseal(body.ticket, env.SESSION_SECRET, 'qr')
+      const ticket = await unsealAny(body.ticket, env, 'qr')
       if (!ticket) throw new ApiError('二维码已过期，请刷新二维码', 400)
       const result = await upstream('qr_check', { key: ticket.key }, {})
       if (result.body.code !== 803) return json({ code: result.body.code })
@@ -221,18 +285,25 @@ export async function handleApi(request, env, upstream = callNetease) {
       const p = accountBody.profile
       if (!p?.userId) throw new ApiError('无法读取登录账号', 401)
       const account = accountFromProfile(p)
-      return json({ code: 803, account }, 200, { 'Set-Cookie': sessionCookie(request, await seal({ account, cookie: result.cookie }, env.SESSION_SECRET, 'session', 604800)) })
+      const session = { account, cookie: result.cookie, exp: Date.now() + 604800000 }
+      return json({ code: 803, account, relay: await relayToken(session, secret) }, 200, { 'Set-Cookie': sessionCookie(request, await seal({ account, cookie: result.cookie }, secret, 'session', 604800)) })
     }
     if (url.pathname === '/api/auth/logout') return json({ ok: true }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) })
-    const session = await getSession(request, env.SESSION_SECRET)
+    const session = await getSession(request, env)
     const valid = Boolean(session?.account && session.cookie?.MUSIC_U)
     // A status probe without a session is a normal answer, not an error (avoids a 401 in every visitor's console).
-    if (url.pathname === '/api/auth/status') return json({ account: valid ? session.account : null })
+    // The status answer also hands the page a relay token (sealed with the shared key, same expiry as the
+    // session), which it sends to the fallback proxies only; it is useless without the server-side secret.
+    if (url.pathname === '/api/auth/status') return json(valid ? { account: session.account, relay: await relayToken(session, secret) } : { account: null })
     if (!valid) throw new ApiError('请先扫码连接网易云音乐', 401)
     if (url.pathname !== '/api/netease') return json({ error: '接口不存在' }, 404)
     if (String(body.uid) !== session.account.uid) throw new ApiError('登录账号已改变，请暂停后重新连接', 401)
     // Only collector methods are public. QR exchange is handled above.
     if (['qr_key', 'qr_check'].includes(body.method)) throw new ApiError('不支持的接口', 400)
+    if (body.method === 'music_first_listen_batch') return json(await firstListenBatch(body.query || {}, session, upstream))
+    const shared = edgeCache(cache), key = cacheKey(url, body.method, body.query || {})
+    const hit = await cached(shared, key)
+    if (hit) return json(hit, 200, { 'X-Chuting-Cache': 'hit' })
     const result = await upstream(body.method, body.query || {}, session.cookie, session.account.uid)
     if (body.method === 'login_status') {
       const p = result.body.profile
@@ -240,11 +311,15 @@ export async function handleApi(request, env, upstream = callNetease) {
       return json({ account: accountFromProfile(p) })
     }
     // Song details are only used for names and album art: trim ~1–2 KB per song down to what is stored.
-    if (body.method === 'song_detail') return json({ code: 200, songs: (result.body.songs || []).map(briefSong) })
+    if (body.method === 'song_detail') {
+      const trimmed = { code: 200, songs: (result.body.songs || []).map(briefSong) }
+      if (publicSongs(result.body.songs, String(body.query?.ids || '').split(','))) await remember(shared, key, 'song_detail', trimmed)
+      return json(trimmed)
+    }
     if (body.method === 'artist_search') {
       const list = result.body.result?.artists || []
       const placeholder = /\/(18686200114669622|5639395138885805)(\.|$)/
-      return json({
+      const trimmed = {
         code: 200,
         artists: list.slice(0, 5).map(a => {
           const name = String(a?.name || '').slice(0, 80)
@@ -255,7 +330,9 @@ export async function handleApi(request, env, upstream = callNetease) {
           if (picUrl && !placeholder.test(picUrl)) out.picUrl = picUrl
           return out
         }).filter(a => a.name),
-      })
+      }
+      await remember(shared, key, 'artist_search', trimmed)
+      return json(trimmed)
     }
     if (body.method === 'song_url') {
       let answer = playable(result.body, body.query?.id)

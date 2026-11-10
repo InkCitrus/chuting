@@ -132,3 +132,25 @@ npx wrangler pages functions build --outdir dist/pages-functions --compatibility
 关掉页面就停；档案不自动跨设备。
 
 参考：[Workers 静态资源](https://developers.cloudflare.com/workers/static-assets/)、[Pages 配置](https://developers.cloudflare.com/pages/functions/wrangler-configuration/)、[Pages 命令](https://developers.cloudflare.com/workers/wrangler/commands/pages/)、[Workers crypto](https://developers.cloudflare.com/workers/runtime-apis/nodejs/crypto/)。
+
+## 省请求与备用代理
+
+免费版 Workers 每天 10 万次请求（UTC 0 点重置），页面因此尽量少打 Functions：
+
+- 初听信息一次请求问最多 20 首（`music_first_listen_batch`，代理里仍是每首单独、只用这个账号的会话去问网易）。1000 首喜欢的歌首次同步约 70 次请求，之前约 1020 次。
+- `/api/runtime` 的结果在本机记 12 小时；`login_status` 一天最多问一次（每次 `/api/netease` 本来就核对账号）。
+- 只有和账号无关的目录数据进边缘缓存（`caches.default`，键里没有 Cookie、uid 或会话）：`song_detail`（裁剪后的歌名、歌手、专辑封面，1 天；含云盘上传的批次不缓存）和 `artist_search`（7 天）。初听、喜欢列表、听歌排行、歌单、播放地址、登录状态从不缓存。
+
+额度用完（1027 页面或 fail-open 的静态页）、限流（429）、5xx，或网易对 Cloudflare 出口返回 -460/-462 时，页面会切到备用代理，过 5、10、20… 分钟（最多 1 小时）再试 Cloudflare。每个浏览器按本地随机 id 固定用其中一台，挂了换另一台。全都不可用时显示「现在使用的人有点多，进度已保存，稍后会自动继续」，已查到的都在本机，2–30 分钟后自动接着同步。
+
+备用代理是 `server/proxy.mjs`：同一套 `handleApi` 跑在 Node 22 上，不存、不记任何请求。跨域不带 Cookie：Functions 在 `/api/auth/status` 和登录结果里给页面一个 relay token（同一份会话用 `SHARED_SESSION_SECRET` 封装、同样的过期时间），页面只把它放在发给备用代理的 `Authorization` 头里。
+
+启用需要：
+
+| 位置 | 名称 | 内容 |
+| --- | --- | --- |
+| Pages 项目 Secret | `SHARED_SESSION_SECRET` | 至少 32 字符的随机串，和备用代理相同。设好后新会话用它封装，旧会话继续可用 |
+| GitHub Actions 变量 | `CHUTING_FALLBACK_ORIGINS` | 逗号分隔的 https 源，构建时写进 `transport.js` 和 CSP 的 `connect-src` |
+| 备用代理环境 | `SHARED_SESSION_SECRET`、`PUBLIC_ORIGIN`、`ALLOWED_ORIGINS` | 见 `server/proxy.mjs` 开头 |
+
+不设 `CHUTING_FALLBACK_ORIGINS` 时行为和以前一样，只走 Functions。

@@ -1,4 +1,5 @@
 import { metadata, reportSongs, monthEnds, needsQuery, inScope, DAY } from './archive-core.js'
+import { BUSY_MESSAGE } from './transport.js'
 const STOP_CODES = [301, 401, 403, 429, 460]
 // Throttle signals: explicit rate limits, -460 "cheating" bodies (the worker maps them to 429), 405 and 503.
 const THROTTLED = [405, 429, 460, 503]
@@ -7,6 +8,12 @@ const localPace = {
   get() { try { return JSON.parse(globalThis.localStorage?.getItem(PACE_KEY) || 'null') } catch { return null } },
   set(value) { try { globalThis.localStorage?.setItem(PACE_KEY, JSON.stringify(value)) } catch {} }
 }
+// A busy sync stops without marking songs failed, saves where it is, and is resumed by the page after this wait.
+export const RESUME_STEPS = [2, 5, 10, 20, 30].map(m => m * 60000)
+const isBusy = err => Boolean(err?.busy) || THROTTLED.includes(err?.code)
+// login_status only refreshes the nickname and avatar (every /api/netease call already checks the account),
+// so it is asked at most once a day.
+const PROFILE_TTL = DAY
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 // Liked songs first (newest like first), then the opt-in sources.
 const PRIORITY = ['喜欢的歌曲', '最近播放', '本周排行', '累计排行', '我的歌单']
@@ -23,6 +30,8 @@ export class BrowserSync {
     this.minInterval = options.interval ?? 67
     this.maxInterval = options.maxInterval ?? 2400; this.cooldown = options.cooldown ?? 15000
     this.step = options.step ?? 8; this.slack = options.latencySlack ?? 600
+    // First-listen lookups per request (0 = one per request). The proxy answers up to 20 in one go.
+    this.batch = Math.max(0, Math.min(20, Number(options.batch) || 0))
     this.lastStart = 0; this.gate = Promise.resolve(); this.stop = false; this.task = null
     this.resetPace()
   }
@@ -70,15 +79,11 @@ export class BrowserSync {
       } catch (err) {
         this.streak = 0
         if (THROTTLED.includes(err.code)) {
-          // Never settle faster than the gap that was just refused.
-          this.safe = Math.min(this.maxInterval, Math.max(this.safe, Math.round(this.interval * 1.5)))
-          this.interval = Math.min(this.maxInterval, Math.max(900, this.interval * 3))
-          this.remember()
+          this.slowDown()
           if (this.strict) { err.throttled = { method, at_interval: this.safe, requests: this.requests }; throw Object.assign(err, { code: err.code === 503 ? 429 : err.code }) }
           if (throttled < 2 && ++this.throttles <= 3 && !this.stop) {
             throttled++
-            if (this.run) await this.phase(`网易云说慢点，歇 ${Math.round(this.cooldown * throttled / 1000)} 秒再来…`).catch(() => {})
-            await this.wait(this.cooldown * throttled)
+            await this.coolDown(throttled)
             continue
           }
         }
@@ -86,6 +91,28 @@ export class BrowserSync {
         await this.wait(2000 * 2 ** attempt)
       }
     }
+  }
+  // Never settle faster than the gap that was just refused.
+  slowDown() {
+    this.safe = Math.min(this.maxInterval, Math.max(this.safe, Math.round(this.interval * 1.5)))
+    this.interval = Math.min(this.maxInterval, Math.max(900, this.interval * 3))
+    this.remember()
+  }
+  async coolDown(times) {
+    if (this.run) await this.phase(`网易云说慢点，歇 ${Math.round(this.cooldown * times / 1000)} 秒再来…`).catch(() => {})
+    await this.wait(this.cooldown * times)
+  }
+  // Checks the account and refreshes nickname/avatar, at most once a day.
+  async profile(account) {
+    const meta = await this.store.getMeta(this.uid)
+    if (Date.now() - (meta?.profile_checked_ms || 0) < PROFILE_TTL) return account
+    const current = await this.request('login_status')
+    if (current.account?.uid !== account.uid) throw new Error('登录账号与本地档案不一致，请重新连接')
+    if (current.account?.avatarUrl || current.account?.nickname !== account.nickname) {
+      account = await this.store.account({ ...account, ...current.account })
+    }
+    await this.store.patchMeta(this.uid, { profile_checked_ms: Date.now() })
+    return account
   }
   async start(account, options = {}) {
     if (this.task) throw new Error('已经有一个同步任务在进行')
@@ -199,17 +226,14 @@ export class BrowserSync {
   // Lazily backfills album art for archives synced (or imported) before covers were stored.
   async coversOnly(account) {
     try {
-      const current = await this.request('login_status')
-      if (current.account?.uid !== account.uid) throw new Error('登录账号与本地档案不一致，请重新连接')
-      if (current.account?.avatarUrl || current.account?.nickname !== account.nickname) {
-        account = await this.store.account({ ...account, ...current.account })
-      }
+      account = await this.profile(account)
       const missing = (await this.store.songs(this.uid)).filter(s => s.first_listen_ms && !s.cover && !s.cover_checked_ms)
         .sort((a, b) => b.first_listen_ms - a.first_listen_ms)
       const warnings = await this.details(missing, '补全专辑封面')
       Object.assign(this.run, { status: this.stop ? 'paused' : 'completed', phase: this.stop ? '停了，进度都在' : '封面补好了', error: warnings[0] || null })
     } catch (err) {
       Object.assign(this.run, { status: err.message === 'PAUSED' ? 'paused' : 'failed', phase: '封面没补全，下次再来', error: err.message === 'PAUSED' ? null : err.message })
+      this.busy(err)
     }
     await this.saveRun()
   }
@@ -232,8 +256,65 @@ export class BrowserSync {
     const offset = this.run.queried
     this.run.total = offset + queue.length
     let cursor = 0, consecutiveErrors = 0, fatal = null
+    const progress = async () => {
+      this.run.phase = `查询初听时间 · ${this.run.queried - offset} / ${queue.length}`
+      this.run.pace = this.paceInfo()
+      await this.saveRun()
+    }
+    const failure = async (id, err) => {
+      try { await this.store.failure(this.uid, id, err.message) }
+      catch { fatal = new Error('本地存储失败，请检查可用空间'); this.stop = true; return false }
+      this.run.failed++
+      return true
+    }
+    // Batches: up to this.batch songs per request. Results are written one by one as they arrive, so a
+    // stop at any point keeps everything already answered; unanswered songs stay pending (not failed).
+    const batchLane = async () => {
+      while (!this.stop && !fatal && cursor < queue.length && this.batch) {
+        const chunk = queue.slice(cursor, cursor + this.batch)
+        cursor += chunk.length
+        let answer
+        try { answer = await this.request('music_first_listen_batch', { ids: chunk.map(s => s.id) }) }
+        catch (err) {
+          if (err.message === 'PAUSED') break
+          // An older proxy without batches: carry on one song per request.
+          if (err.code === 400 && /不支持/.test(err.message)) { this.batch = 0; queue.push(...chunk); break }
+          if (STOP_CODES.includes(err.code) || isBusy(err) || err.throttled) { fatal = err; this.stop = true; break }
+          for (const song of chunk) { if (!await failure(song.id, err)) break; this.run.queried++ }
+          if (++consecutiveErrors >= 3) { fatal = err; this.stop = true }
+          await progress()
+          continue
+        }
+        const answered = new Set()
+        for (const item of answer.results || []) {
+          const song = chunk.find(s => s.id === String(item.id))
+          if (!song || answered.has(song.id)) continue
+          answered.add(song.id)
+          if (item.body) {
+            try { this.run[await this.store.result(this.uid, song.id, item.body)]++ }
+            catch (err) { if (!await failure(song.id, err)) break }
+          } else if (!await failure(song.id, new Error(item.error || '没查到'))) break
+          this.run.queried++
+        }
+        if (answered.size) consecutiveErrors = 0
+        else if (!answer.throttled && ++consecutiveErrors >= 3) { fatal = new Error('网易接口暂时没有返回有效结果'); this.stop = true }
+        // Cut short by risk control: the rest go back in line after a cool-down.
+        const rest = chunk.filter(s => !answered.has(s.id))
+        if (rest.length) queue.push(...rest)
+        await progress()
+        if (answer.throttled) {
+          this.slowDown()
+          if (this.strict || ++this.throttles > 3) {
+            fatal = Object.assign(new Error('接口请求受限，请稍后再同步'), { code: 429, throttled: { method: 'music_first_listen_batch', at_interval: this.safe, requests: this.requests } })
+            this.stop = true; break
+          }
+          await this.coolDown(this.throttles)
+        }
+      }
+    }
     // Await all lanes before finalizing: a paused/failed run cannot race late writes.
     const lane = async () => {
+      if (this.batch) await batchLane()
       while (!this.stop && !fatal && cursor < queue.length) {
         const song = queue[cursor++]
         try {
@@ -243,6 +324,8 @@ export class BrowserSync {
           consecutiveErrors = 0
         } catch (err) {
           if (err.message === 'PAUSED') break
+          // Busy everywhere: stop here, leave the song pending, the page resumes the sync later.
+          if (err.busy && !err.throttled) { fatal = err; this.stop = true; break }
           try { await this.store.failure(this.uid, song.id, err.message) }
           catch { fatal = new Error('本地存储失败，请检查可用空间'); this.stop = true; break }
           this.run.failed++
@@ -250,12 +333,12 @@ export class BrowserSync {
           if (STOP_CODES.includes(err.code) || err.throttled || consecutiveErrors >= 3) { fatal = err; this.stop = true }
         }
         this.run.queried++
-        this.run.phase = `查询初听时间 · ${this.run.queried - offset} / ${queue.length}`
-        this.run.pace = this.paceInfo()
-        await this.saveRun()
+        await progress()
       }
     }
-    const lanes = await Promise.allSettled([...Array.from({ length: options.concurrency }, lane), rest])
+    // Batched lanes each keep 2 NetEase calls in flight, so 2 lanes match the old 8-lane, 15 req/s ceiling.
+    const width = this.batch ? Math.min(options.concurrency, 2) : options.concurrency
+    const lanes = await Promise.allSettled([...Array.from({ length: width }, lane), rest])
     const rejected = lanes.find(x => x.status === 'rejected')
     if (rejected) throw rejected.reason
     if (fatal) throw fatal
@@ -263,11 +346,7 @@ export class BrowserSync {
   async collect(account, options) {
     const warnings = []
     try {
-      const current = await this.request('login_status')
-      if (current.account?.uid !== account.uid) throw new Error('登录账号与本地档案不一致，请重新连接')
-      if (current.account?.avatarUrl || current.account?.nickname !== account.nickname) {
-        account = await this.store.account({ ...account, ...current.account })
-      }
+      account = await this.profile(account)
       // Pass 1: liked songs (plus recent plays, rankings and playlists when enabled) are cheap to find, so their dates show up within seconds.
       warnings.push(...await this.discover({ ...options, basic_only: true }))
       await this.drain(options, warnings)
@@ -281,12 +360,21 @@ export class BrowserSync {
       this.run.pace = this.paceInfo(); this.remember()
       const unique = [...new Set(warnings)]
       this.run.error = unique.length ? unique.slice(0, 5).join('；') + (unique.length > 5 ? `；另有 ${unique.length - 5} 项未读取` : '') : null
+      delete this.run.resume_ms; this.resumes = 0
     } catch (err) {
       this.run.status = err.message === 'PAUSED' ? 'paused' : 'failed'
       this.run.phase = err.message === 'PAUSED' ? '停了，进度都在' : '先停一下，进度都在'
       this.run.error = err.message === 'PAUSED' ? null : err.message
       this.run.pace = { ...this.paceInfo(), ...(err.throttled ? { stopped_by: err.code, ...err.throttled } : {}) }
+      this.busy(err)
     }
     await this.saveRun()
+  }
+  // Too busy (quota, rate limits, every route down): say so plainly and schedule an automatic resume.
+  busy(err) {
+    if (err.message === 'PAUSED' || this.strict || !isBusy(err)) { delete this.run.resume_ms; return }
+    const step = RESUME_STEPS[Math.min(this.resumes || 0, RESUME_STEPS.length - 1)]
+    this.resumes = (this.resumes || 0) + 1
+    Object.assign(this.run, { busy: true, phase: BUSY_MESSAGE, error: BUSY_MESSAGE, resume_ms: Date.now() + step })
   }
 }
