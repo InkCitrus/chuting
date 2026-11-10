@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, travelQuality, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
+import { easeOut, easeTravel, lerp, clockParts, formatClock, formatTravelMeta, travelFx, pickTravelCovers, fillTravelWall, cardPose, heroPose, tileLayout, travelStageLayout, travelQuality, cardTransform, cardDepthIndex, TRAVEL_MAX_COVERS, TRAVEL_TILES, TRAVEL_MS, TRAVEL_RINGS } from '../web/travel.js'
 
 test('easeOut stays in range and slows near the end', () => {
   assert.equal(easeOut(0), 0)
@@ -212,4 +212,56 @@ test('travelQuality picks a lighter path on constrained devices', () => {
   assert.ok(lite.tiles < travelStageLayout(390, 844, 'full').tiles)
   assert.ok(lite.rotateY >= 10)
   assert.ok(lite.rotateX >= 8)
+})
+
+
+// 4x4 helpers (column vectors) to check the per-card projection numerically.
+const mul = (a, b) => a.map((row, i) => b[0].map((_, j) => row.reduce((acc, _v, k) => acc + a[i][k] * b[k][j], 0)))
+const T = (x, y, z = 0) => [[1, 0, 0, x], [0, 1, 0, y], [0, 0, 1, z], [0, 0, 0, 1]]
+const P = d => [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, -1 / d, 1]]
+const RY = deg => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [[c, 0, s, 0], [0, 1, 0, 0], [-s, 0, c, 0], [0, 0, 0, 1]] }
+const project = (m, p) => { const v = mul(m, [[p[0]], [p[1]], [p[2]], [1]]).map(r => r[0]); return [v[0] / v[3], v[1] / v[3]] }
+
+test('cardTransform needs no 3D context: it projects exactly like a parent perspective with that origin', () => {
+  const pose = { x: -164, y: -266, z: -312, rotateX: 0, rotateY: 16, scale: 1 }
+  const cam = { perspective: 640, ox: 0, oy: -13.3 }
+  const css = cardTransform(pose, cam)
+  assert.match(css, /^translate3d\(0\.0px, -13\.3px, 0px\) perspective\(640px\) translate3d\(-164\.0px, -252\.7px, -312\.0px\) rotateX\(0deg\) rotateY\(16deg\) scale\(1\.0000\)$/)
+  assert.ok(!/var\(|calc\(/.test(css), 'no var()/calc() for iOS to drop')
+  // Old: parent perspective about origin o; card transform about its centre (o - offset).
+  const o = [cam.ox, cam.oy]
+  const parent = mul(mul(mul(T(o[0], o[1]), P(640)), T(-o[0], -o[1])), mul(T(pose.x, pose.y, pose.z), RY(16)))
+  const own = mul(mul(mul(T(o[0], o[1]), P(640)), T(pose.x - o[0], pose.y - o[1], pose.z)), RY(16))
+  for (const pt of [[-74, -74, 0], [74, -74, 0], [74, 74, 0], [-74, 74, 0]]) {
+    const a = project(parent, pt), b = project(own, pt)
+    assert.ok(Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9)
+  }
+  // Tilt really survives: the far edge of a rotated card is shorter than the near edge.
+  const near = project(own, [74, -74, 0]), near2 = project(own, [74, 74, 0])
+  const far = project(own, [-74, -74, 0]), far2 = project(own, [-74, 74, 0])
+  assert.notEqual(Math.round(Math.abs(near2[1] - near[1])), Math.round(Math.abs(far2[1] - far[1])))
+  assert.equal(cardTransform({ x: 1, y: 2, z: 3 }, { perspective: 900 }).startsWith('perspective(900px) '), true)
+})
+
+test('lite and portrait layouts keep the tilt in the per-card transform', () => {
+  for (const [w, h, q] of [[390, 664, 'lite'], [390, 664, 'full'], [1280, 800, 'lite']]) {
+    const layout = travelStageLayout(w, h, q)
+    const tilted = Array.from({ length: 24 }, (_, i) => cardPose(i, 24, 0.42, false, layout)).filter(p => p.opacity > 0.01)
+    assert.ok(tilted.some(p => (p.rotateX || 0) !== 0 || (p.rotateY || 0) !== 0), `${w}x${h} ${q}`)
+    assert.ok(tilted.every(p => /rotateY\(/.test(cardTransform(p, { perspective: layout.perspective }))))
+  }
+})
+
+test('cardDepthIndex paints far rings under near rings and only changes a few times per ring', () => {
+  const layout = travelStageLayout(390, 664, 'full')
+  let last = 0, changes = 0
+  for (let z = layout.zMin; z < layout.zMin + layout.spacing * 4; z += 5) {
+    const zi = cardDepthIndex(z, layout)
+    assert.ok(zi >= last)
+    if (zi !== last) changes += 1
+    last = zi
+  }
+  assert.ok(changes <= 9)
+  assert.ok(cardDepthIndex(layout.zMin + layout.spacing, layout) > cardDepthIndex(layout.zMin, layout))
+  assert.ok(cardDepthIndex(-1e6, layout) >= 1)
 })

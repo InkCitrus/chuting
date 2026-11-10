@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPlayer, PLAYER_LINES, PLAY_QUERY, FALLBACK_QUERY, playErrorMessage, audioHosts, hardAnswer, cloudUnplayableMessage, browserCanPlay } from '../web/player.js'
+import { createPlayer, PRIME_SRC, PLAYER_LINES, PLAY_QUERY, FALLBACK_QUERY, playErrorMessage, audioHosts, hardAnswer, cloudUnplayableMessage, browserCanPlay } from '../web/player.js'
 
 class FakeAudio extends EventTarget {
   constructor() {
@@ -8,7 +8,7 @@ class FakeAudio extends EventTarget {
     this.paused = true
     this.currentTime = 0
     this.duration = NaN
-    this.src = ''
+    this._src = ''
     this.volume = 1
     this.playbackRate = 1
     this.readyState = 0
@@ -30,14 +30,24 @@ class FakeAudio extends EventTarget {
       queueMicrotask(() => this.dispatchEvent(new Event('error')))
       return Promise.reject(err)
     }
+    ;(this.playLog || (this.playLog = [])).push({ src: this.src, muted: Boolean(this.muted) })
     this.paused = false
     this.duration = 180
     this.readyState = 4
     this.dispatchEvent(new Event('loadedmetadata'))
     this.dispatchEvent(new Event('playing'))
+    // iOS WebKit: a play() that only passed the muted-autoplay rule is paused again on unmute.
+    if (this._pauseAfterPlay && !this.src.startsWith('data:')) return Promise.resolve().then(() => { this.paused = true })
     return Promise.resolve()
   }
   pause() { this.paused = true; this.dispatchEvent(new Event('pause')) }
+  // Like a real media element, a new src resets the playback state.
+  get src() { return this._src }
+  set src(v) {
+    this._src = String(v || '')
+    this.paused = true; this.duration = NaN; this.readyState = 0; this.error = null; this.currentTime = 0
+    ;(this.srcLog || (this.srcLog = [])).push(this._src)
+  }
   getAttribute(name) { return name === 'src' ? (this.src || null) : null }
   load() {
     // An empty element reports code 4. Browsers do this while src is still blank; a later song must not inherit it.
@@ -92,9 +102,12 @@ function install(canPlay = '') {
     constructor() { super(); audio = this }
   }
   globalThis.document = { body: { classList: { toggle() {} } }, createElement: () => ({ canPlayType: () => canPlay }) }
+  const raf = globalThis.requestAnimationFrame, caf = globalThis.cancelAnimationFrame
+  globalThis.requestAnimationFrame = cb => setTimeout(() => cb(performance.now()), 4)
+  globalThis.cancelAnimationFrame = id => clearTimeout(id)
   return {
     audio: () => audio,
-    restore() { globalThis.Audio = Original }
+    restore() { globalThis.Audio = Original; globalThis.requestAnimationFrame = raf; globalThis.cancelAnimationFrame = caf }
   }
 }
 
@@ -528,6 +541,158 @@ test('unlock does not replace a real source with a silent clip', async () => {
     player.unlock()
     assert.equal(env.audio().src, src)
     assert.equal(src.startsWith('data:'), false)
+  } finally {
+    env.restore()
+  }
+})
+
+
+function deferred() {
+  let resolve
+  const promise = new Promise(r => { resolve = r })
+  return { promise, resolve }
+}
+const okUrl = id => ({ url: `https://m801.music.126.net/${id}.mp3`, type: 'mp3', duration: 180000 })
+
+test('switching songs silences the old track in the same tap, before the new URL arrives', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    const gates = {}
+    const player = createPlayer({
+      els, mini,
+      getUrl: (event) => (gates[event.song_id] = deferred()).promise,
+      coverFor: () => null, onEnded() {}, onOpen() {}
+    })
+    const first = player.play({ song_id: 'a', name: 'A' })
+    gates.a.resolve(okUrl('a'))
+    assert.equal((await first).ok, true)
+    assert.equal(env.audio().paused, false)
+    assert.ok(env.audio().src.includes('/a.mp3'))
+    const second = player.play({ song_id: 'b', name: 'B' })
+    // Synchronously, still inside the tap: A is gone and nothing claims to play.
+    assert.equal(env.audio().src.includes('/a.mp3'), false)
+    assert.equal(env.audio().src, PRIME_SRC)
+    assert.equal(player.current.song_id, 'b')
+    assert.equal(player.playing, false)
+    assert.equal(mini.root.dataset.playingId, 'b')
+    assert.equal(mini.root.dataset.audioSrc, '')
+    gates.b.resolve(okUrl('b'))
+    const result = await second
+    assert.equal(result.ok, true)
+    assert.equal(result.song_id, 'b')
+    assert.ok(env.audio().src.includes('/b.mp3'))
+    assert.equal(player.playing, true)
+  } finally {
+    env.restore()
+  }
+})
+
+test('play() reaches the element inside the tap (iOS unlock) and the primer never ends or skips a song', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    let ended = 0
+    const gate = deferred()
+    const player = createPlayer({ els, mini, getUrl: () => gate.promise, coverFor: () => null, onEnded() { ended += 1 }, onOpen() {} })
+    const job = player.play({ song_id: 'c', name: 'C' }, { fadeIn: 20 })
+    // Before any network wait: one synchronous play() on the silent primer.
+    assert.deepEqual(env.audio().playLog, [{ src: PRIME_SRC, muted: false }])
+    env.audio().dispatchEvent(new Event('ended'))
+    env.audio().dispatchEvent(new Event('playing'))
+    assert.equal(ended, 0)
+    assert.equal(player.playing, false)
+    gate.resolve(okUrl('c'))
+    assert.equal((await job).ok, true)
+    await new Promise(r => setTimeout(r, 80)) // let the short fade finish
+  } finally {
+    env.restore()
+  }
+})
+
+test('a fade-in never starts muted, and a play() that WebKit pauses again reports blocked, not ok', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    let skipped = 0
+    const player = createPlayer({
+      els, mini, getUrl: async () => okUrl('d'), coverFor: () => null, onEnded() {}, onOpen() {},
+      onUnplayable() { skipped += 1 }
+    })
+    env.audio()._pauseAfterPlay = true
+    const result = await player.play({ song_id: 'd', name: 'D' }, { fadeIn: 20 })
+    const real = env.audio().playLog.filter(x => !x.src.startsWith('data:'))
+    assert.equal(real.length, 1)
+    assert.equal(real[0].muted, false)
+    assert.equal(result.ok, false)
+    assert.equal(result.blocked, true)
+    assert.equal(result.song_id, 'd')
+    assert.equal(skipped, 0)
+  } finally {
+    env.restore()
+  }
+})
+
+test('a tap on a blocked track plays that same track synchronously, without asking for the URL again', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    let asks = 0
+    const player = createPlayer({ els, mini, getUrl: async (e) => { asks += 1; return okUrl(e.song_id) }, coverFor: () => null, onEnded() {}, onOpen() {} })
+    env.audio()._fail = 'NotAllowedError'
+    const blocked = await player.play({ song_id: 'e', name: 'E' })
+    assert.equal(blocked.blocked, true)
+    assert.ok(env.audio().src.includes('/e.mp3'))
+    env.audio()._fail = null
+    const before = (env.audio().playLog || []).length
+    const job = player.resume({ song_id: 'e', name: 'E' })
+    // play() already ran, in the tap, on the displayed song's own URL.
+    const log = env.audio().playLog
+    assert.equal(log.length, before + 1)
+    assert.ok(log.at(-1).src.includes('/e.mp3'))
+    const result = await job
+    assert.equal(result.ok, true)
+    assert.equal(result.song_id, 'e')
+    assert.equal(asks, 1)
+    assert.equal(player.playing, true)
+    assert.equal(player.current.song_id, 'e')
+    assert.equal(player.job, job)
+  } finally {
+    env.restore()
+  }
+})
+
+test('resume() for a song the player is not holding loads that song', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    const player = createPlayer({ els, mini, getUrl: async (e) => okUrl(e.song_id), coverFor: () => null, onEnded() {}, onOpen() {} })
+    await player.play({ song_id: 'f', name: 'F' })
+    const result = await player.resume({ song_id: 'g', name: 'G' })
+    assert.equal(result.song_id, 'g')
+    assert.equal(player.current.song_id, 'g')
+    assert.ok(env.audio().src.includes('/g.mp3'))
+  } finally {
+    env.restore()
+  }
+})
+
+test('job follows auto-skip so a waiting page reads the result of the song that is actually loading', async () => {
+  const env = install()
+  try {
+    const { els, mini } = mount()
+    let player
+    const answers = { bad: { url: null, reason: 'unavailable' }, good: okUrl('good') }
+    player = createPlayer({
+      els, mini, getUrl: async (e) => answers[e.song_id], coverFor: () => null, onEnded() {}, onOpen() {},
+      onUnplayable() { player.play({ song_id: 'good', name: 'Good' }) }
+    })
+    const first = await player.play({ song_id: 'bad', name: 'Bad' })
+    assert.equal(first.song_id, 'bad')
+    assert.equal(player.current.song_id, 'good')
+    const latest = await player.job
+    assert.equal(latest.song_id, 'good')
+    assert.equal(latest.ok, true)
   } finally {
     env.restore()
   }

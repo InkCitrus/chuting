@@ -91,6 +91,11 @@ export function playErrorMessage(err, _mediaError, answer) {
   return PLAYER_LINES.failed
 }
 
+// A tiny silent clip. play() on it runs inside the tap that asked for a song:
+// it stops the previous track at once and unlocks the element on iOS WebKit
+// (Safari and Chrome on iPhone), so the real src may play after the network wait.
+export const PRIME_SRC = 'data:audio/wav;base64,UklGRgQCAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YeABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA='
+
 export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onChange, onUnplayable }) {
   const audio = new Audio()
   audio.preload = 'auto'
@@ -100,6 +105,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
   let fadeRaf = 0
   let mediaEpoch = 0
   let recovery = null
+  let lastJob = null
   function applyGain(g) {
     state.gain = Math.min(1, Math.max(0, g))
     audio.volume = Math.min(1, Math.max(0, state.userVolume * state.gain))
@@ -121,6 +127,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
   }
   function status() {
     return {
+      song_id: state.event?.song_id ?? null,
       ok: Boolean(state.answer?.url) && !state.error && !state.blocked,
       error: state.error || '',
       reason: state.blocked ? 'blocked' : (state.answer?.reason || (state.error ? 'failed' : '')),
@@ -140,7 +147,8 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     else pos = 0
     return { dur, pos }
   }
-  function transportPlaying() { return Boolean(state.event) && !state.failed && !state.error && !audio.paused }
+  const isPrime = () => String(audio.src || '').startsWith('data:')
+  function transportPlaying() { return Boolean(state.event) && !state.failed && !state.error && !audio.paused && !isPrime() }
   function render() {
     const current = isCurrent(), playing = current && transportPlaying()
     const unavailable = current && state.answer && !state.answer.url
@@ -206,6 +214,19 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     audio.removeAttribute('src')
     // Do not call audio.load() on an empty element: on iOS / mobile Chrome
     // that drops the user-gesture unlock and can fire a spurious `ended`.
+  }
+  // The listener asked for a different song: silence the old one now, so the
+  // arrival page / mini bar never show one song while another is still heard.
+  function prime() {
+    mediaEpoch++
+    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(fadeRaf)
+    try { audio.pause() } catch {}
+    audio.muted = false
+    try {
+      audio.src = PRIME_SRC
+      const p = audio.play()
+      if (p && p.catch) p.catch(() => {})
+    } catch {}
   }
   function noteUnplayable(event, result) {
     try { onUnplayable?.(event, result) } catch {}
@@ -287,9 +308,9 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       return { ok: false, error: PLAYER_LINES[state.offline] || PLAYER_LINES.offline, reason: state.offline, trial: false }
     }
     const gen = ++state.gen
+    if (!fallback) prime()
     adopt(event); state.answer = null; state.error = ''; state.failed = false; state.blocked = false; state.loading = true; state.retried = Boolean(fallback)
-    // Keep any muted/primed playback alive until the new URL arrives so a
-    // play() started in a tap gesture still counts after the network wait.
+    // The old track is already stopped (prime); ignore its leftover media events.
     state.replacing = true
     mini.title.textContent = event.name; mini.artist.textContent = event.artists || ''
     mini.cover.replaceChildren(); const art = coverFor(event); if (art) { const img = new Image(); img.alt = ''; img.decoding = 'async'; img.src = art(96); mini.cover.append(img) }
@@ -314,8 +335,16 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       audio.src = state.hosts[0]
       firstSrc = audio.src
       seekWhenReady(at)
-      if (state.pendingFade) { applyGain(0); audio.muted = true }
-      if (autoplay) await audio.play()
+      // Fade with volume only. A muted play() is allowed without a gesture on iOS,
+      // but WebKit pauses it again the moment it is unmuted, while we would
+      // report success: silent, with no tap-to-play hint.
+      audio.muted = false
+      if (state.pendingFade) applyGain(0)
+      if (autoplay) {
+        await audio.play()
+        if (gen !== state.gen) return stale()
+        if (audio.paused) return markBlocked()
+      }
       if (gen !== state.gen) return stale()
       state.replacing = false
       if (state.pendingFade) {
@@ -375,6 +404,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
   // A host failure tries the twin edge first; a decode failure then asks for a lower level once. Errors from an older src are ignored,
   // so a slow song cannot stamp an error onto the one the listener just opened.
   audio.addEventListener('error', () => {
+    if (isPrime()) return
     const epoch = mediaEpoch
     const gen = state.gen
     const src = audio.src
@@ -386,6 +416,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     })
   })
   for (const type of ['play', 'pause', 'timeupdate', 'progress', 'durationchange', 'loadedmetadata', 'waiting', 'playing']) audio.addEventListener(type, () => {
+    if (isPrime()) return
     if (type === 'waiting') state.loading = true
     if (type === 'playing') {
       if (state.failed) { try { audio.pause() } catch {} ; return }
@@ -396,6 +427,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     if ('mediaSession' in navigator && (type === 'play' || type === 'pause')) navigator.mediaSession.playbackState = state.failed || audio.paused ? 'paused' : 'playing'
   })
   audio.addEventListener('ended', () => {
+    if (isPrime()) return
     if (state.loading || state.replacing || state.failed) return
     if (!state.event || !state.answer?.url) return
     onEnded(state.event)
@@ -442,12 +474,26 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     get playing() { return transportPlaying() },
     play(event, opts = {}) {
       state.shown = state.shown || event
-      if (opts.fadeIn) {
-        state.pendingFade = typeof opts.fadeIn === 'number' ? opts.fadeIn : 1500
-        applyGain(0)
-        audio.muted = true
+      if (opts.fadeIn) state.pendingFade = typeof opts.fadeIn === 'number' ? opts.fadeIn : 1500
+      const job = load(event, { autoplay: opts.autoplay !== false, at: opts.at || 0 })
+      lastJob = job
+      return job
+    },
+    // The newest play() promise, so callers that did not start it (auto-skip,
+    // end of song) can still wait for the result of the track now loading.
+    get job() { return lastJob },
+    // A tap on a blocked track. If its URL is already on the element, play()
+    // runs right here inside the gesture: no network wait, so iOS allows it.
+    resume(event) {
+      if (event && state.event?.song_id === event.song_id && state.blocked && state.answer?.url && audio.src && !isPrime()) {
+        state.blocked = false
+        const job = Promise.resolve(audio.play()).then(() => {
+          state.replacing = false; state.loading = false; audio.muted = false; applyGain(1); render(); return status()
+        }, err => err?.name === 'NotAllowedError' ? markBlocked() : settle(state.gen, err))
+        lastJob = job
+        return job
       }
-      return load(event, { autoplay: opts.autoplay !== false, at: opts.at || 0 })
+      return this.play(event || state.event)
     },
     unlock() {
       try {
