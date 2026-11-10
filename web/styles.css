@@ -445,7 +445,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .segmented button { position: relative; z-index: 1; border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--muted); transition: color .3s; flex: 1; min-width: 5.6em }
 .segmented button:active:not(:disabled) { transform: scale(.97) }
 .segmented::before { content: ""; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 999px; background: var(--ink); transition: transform .45s var(--spring) }
-.segmented:has(#orderOldest[aria-pressed="true"])::before { transform: translateX(100%) }
+.segmented:has(#orderOldest[aria-pressed="true"])::before, .segmented:has(#viewWall[aria-pressed="true"])::before { transform: translateX(100%) }
 .segmented.thirds { width: 100% }
 .segmented.thirds::before { width: calc((100% - 6px) / 3) }
 .segmented.thirds:has([data-theme-opt="light"][aria-pressed="true"])::before { transform: translateX(100%) }
@@ -636,7 +636,15 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
 .login-status { text-align: center; font-size: 14.5px; color: var(--ink-2); margin: 0 0 14px }
 .login-status[data-tone="ok"] { color: var(--ok); font-weight: 600 }
 .login-status[data-tone="warn"] { color: var(--warn) }
-#refreshQr { display: flex; margin: 0 auto }
+.qr-actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap }
+/* Same phone as the NetEase app: save the code, then scan it from the album. */
+.qr-steps { list-style: none; counter-reset: qr; margin: 18px 0 4px; padding: 0; display: grid; gap: 10px }
+.qr-steps li { counter-increment: qr; display: grid; grid-template-columns: 30px 1fr; column-gap: 12px; align-items: baseline }
+.qr-steps li::before { content: "0" counter(qr); grid-row: span 2; font-family: var(--display); font-weight: 700; font-size: 20px; color: var(--accent); line-height: 1.1 }
+.qr-steps b { font-family: var(--serif); font-size: 16px; color: var(--ink) }
+.qr-steps span { font-size: 13.5px; color: var(--muted); line-height: 1.55 }
+#loginDialog.is-same-phone .qr-frame { width: 212px; height: 212px; margin: 16px auto 12px }
+#loginDialog.is-same-phone .login-qr { width: 198px; height: 198px; -webkit-touch-callout: default; user-select: auto }
 
 .toast { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: color-mix(in srgb, var(--ink) 94%, transparent); color: var(--bg); padding: 12px 20px 12px 16px; border-radius: 14px; font-size: 14px; max-width: min(520px, calc(100% - 28px)); box-shadow: var(--shadow-lg); z-index: 60; line-height: 1.6; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px) }
 .toast::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--ok) }
@@ -1537,3 +1545,97 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
   .travel-clock::before { width: min(420px, 88vw); height: 280px }
 }
 
+
+/* 同步进行时：刚找到的歌一张张落进来，像正在往墙上贴封面 */
+.sync-live { display: flex; align-items: center; gap: 22px; margin: 26px 0 0; padding: 18px 0 0; border-top: 1px solid var(--line); max-width: 36em }
+.sync-live[hidden] { display: none }
+.sync-wall { position: relative; flex-shrink: 0; width: 176px; height: 112px }
+.sync-tile { position: absolute; top: 14px; width: 84px; height: 84px; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 14px 26px -14px rgb(20 14 8 / .55), 0 0 0 1px rgb(0 0 0 / .05); transform: translateX(calc(var(--i) * 18px)) rotate(var(--r)) }
+.sync-tile.is-empty { background: var(--bg-2); box-shadow: none; animation: sync-pulse 1.6s ease-in-out infinite; animation-delay: calc(var(--i) * -.3s) }
+@keyframes sync-pulse { 50% { opacity: .45 } }
+@media (prefers-reduced-motion: no-preference) {
+  .sync-tile.is-new { animation: sync-drop .62s cubic-bezier(.2, .9, .25, 1.15) both }
+}
+@keyframes sync-drop { from { opacity: 0; transform: translate(calc(var(--i) * 18px + 26px), -34px) rotate(calc(var(--r) + 10deg)) scale(1.12) } }
+.sync-live-text { min-width: 0; flex: 1 }
+.sync-live-count { margin: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-family: var(--serif); font-size: 15px; color: var(--ink-2) }
+.sync-live-count .num { font-family: var(--display); font-size: 44px; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums lining-nums }
+.sync-live-phase { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-2); font-variant-numeric: tabular-nums }
+.sync-live-bar { display: block; height: 3px; margin: 10px 0 0; border-radius: 3px; background: var(--line); overflow: hidden }
+.sync-live-bar > i { display: block; height: 100%; background: var(--accent); transform-origin: left center; transform: scaleX(0); transition: transform .6s var(--ease) }
+.sync-live[data-mode="wait"] .sync-live-bar > i { background: var(--muted) }
+.sync-live-note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.6 }
+@media (max-width: 640px) {
+  .sync-live { gap: 16px; margin-top: 20px; padding-top: 16px }
+  .sync-wall { width: 136px; height: 92px }
+  .sync-tile { width: 68px; height: 68px; top: 12px; transform: translateX(calc(var(--i) * 14px)) rotate(var(--r)) }
+  .sync-live-count .num { font-size: 38px }
+  .hero.has-highlights:has(#heroCapsule:not([hidden])) .sync-live { order: 3; margin: 0; padding-top: 14px; max-width: none }
+}
+
+/* 封面墙：每个月一面方形封面拼贴，日期压在当天第一张上 */
+.view-toggle button { min-width: 4.6em }
+.view-toggle button:disabled { opacity: .45; cursor: default }
+.wall { list-style: none; margin: 0 0 56px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px }
+.wall > li { min-width: 0 }
+.wall-song { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: var(--bg-2); color: #fff; text-align: left;
+  box-shadow: 0 12px 24px -16px rgb(20 14 8 / .5); transition: transform .45s var(--spring), box-shadow .4s var(--ease) }
+.wall-cover { position: absolute; inset: 0; border-radius: 0 }
+.wall-cover .glyph { font-size: 44px }
+.wall-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 10px 8px; background: linear-gradient(to top, rgb(12 10 8 / .72), transparent); opacity: 0; transform: translateY(6px); transition: opacity .3s, transform .35s var(--ease) }
+.wall-name { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgb(0 0 0 / .4) }
+.wall-day { position: absolute; top: 6px; left: 8px; font-family: var(--display); font-weight: 700; font-size: 30px; line-height: 1; letter-spacing: -.03em; color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / .35), 0 0 18px rgb(0 0 0 / .35); font-variant-numeric: lining-nums }
+.wall-song.is-today .wall-day::after { content: "今天"; margin-left: 6px; vertical-align: 6px; font-family: var(--sans, inherit); font-size: 10.5px; font-weight: 600; letter-spacing: 0; padding: 1px 7px; border-radius: 99px; background: var(--accent); color: var(--on-accent) }
+.wall-song:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px }
+@media (hover: hover) {
+  .wall-song:hover { transform: translateY(-4px) rotate(var(--tilt, -1.5deg)) scale(1.03); box-shadow: 0 22px 34px -18px rgb(20 14 8 / .6); z-index: 1 }
+  .wall > li:nth-child(even) .wall-song { --tilt: 1.5deg }
+  .wall-song:hover .wall-cap, .wall-song:focus-visible .wall-cap { opacity: 1; transform: none }
+}
+@media (hover: none) { .wall-cap { opacity: 1; transform: none; padding-top: 22px } .wall-name { font-size: 11px } }
+.wall-song.is-locate { outline: 2px solid var(--accent); outline-offset: 3px }
+@media (prefers-reduced-motion: no-preference) {
+  .wall-song.is-locate { animation: locate-cover 1.15s var(--spring-soft) }
+  .motion .wall.reveal .wall-song { opacity: 0; translate: 0 14px; scale: .94; transition: opacity .5s var(--ease), translate .6s var(--ease), scale .6s var(--spring-soft), transform .45s var(--spring), box-shadow .4s var(--ease);
+    transition-delay: calc(var(--i, 0) * 35ms + 80ms), calc(var(--i, 0) * 35ms + 80ms), calc(var(--i, 0) * 35ms + 80ms), 0s, 0s }
+  .motion .wall.reveal.shown .wall-song { opacity: 1; translate: 0 0; scale: 1 }
+}
+.timeline.is-wall .chapter-head { margin-bottom: 28px }
+@media (max-width: 640px) {
+  .wall { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 40px }
+  .wall-song { border-radius: 8px }
+  .wall-day { font-size: 22px; top: 4px; left: 6px }
+  .wall-cover .glyph { font-size: 32px }
+  .wall-cap { padding: 18px 6px 5px }
+}
+@media (max-width: 640px) {
+  /* 排序和显示方式并排一行，工具区不再多占一行 */
+  .timeline-tools .segmented { width: auto; flex: 1 1 0; min-width: 0 }
+  .timeline-tools .segmented button { min-width: 0; padding: 6px 8px }
+}
+.timeline.is-wall .chapter { contain-intrinsic-size: auto 760px }
+@media (max-width: 640px) {
+  .timeline.is-wall .chapter { padding-top: 48px }
+  .timeline.is-wall .chapter-numeral { font-size: 72px }
+  .timeline.is-wall .chapter-head { margin-bottom: 20px }
+}
+
+/* 海报还在画的时候先给一张同尺寸的骨架，弹窗不再等网络 */
+.share-skeleton { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 9% 8%; background: rgb(30 28 26 / .92); box-shadow: 0 28px 70px rgb(0 0 0 / .4); overflow: hidden }
+.share-skeleton > b, .share-skeleton > span, .share-skeleton-wall > i { display: block; border-radius: 4px; background: rgb(243 238 230 / .1) }
+.share-skeleton > b { width: 58%; height: 9% }
+.share-skeleton > span { width: 74%; height: 2.2% }
+.share-skeleton > span + span { width: 46% }
+.share-skeleton-wall { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px }
+.share-skeleton-wall > i { aspect-ratio: 1 }
+.share-skeleton-wall > i:nth-child(odd) { transform: rotate(-2deg) }
+.share-skeleton-wall > i:nth-child(even) { transform: rotate(2deg) }
+@media (prefers-reduced-motion: no-preference) {
+  .share-skeleton > * { animation: sync-pulse 1.5s ease-in-out infinite }
+  .share-skeleton-wall { animation: none }
+  .share-skeleton-wall > i { animation: sync-pulse 1.5s ease-in-out infinite; animation-delay: calc(var(--d, 0) * 1s) }
+  .share-skeleton-wall > i:nth-child(3n+2) { animation-delay: -.3s }
+  .share-skeleton-wall > i:nth-child(3n) { animation-delay: -.6s }
+}
+.share-image { -webkit-touch-callout: default; user-select: auto; -webkit-user-select: auto }

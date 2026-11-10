@@ -59,6 +59,15 @@
         <p class="hero-tagline" id="heroTagline">每首歌，都有第一次响起的那天。</p>
         <p class="hero-story" id="heroStory">扫一下，把你喜欢的歌一首首送回第一次听见它的那天。</p>
         <p class="hero-sub" id="heroSub">先从你喜欢的歌开始，想多翻点，设置里再开。</p>
+        <div id="syncLive" class="sync-live" hidden>
+          <div class="sync-wall" id="syncWall" aria-hidden="true"></div>
+          <div class="sync-live-text">
+            <p class="sync-live-count"><b class="num" id="syncFound">0</b><span id="syncFoundLabel">首初听，这次新找到</span></p>
+            <p class="sync-live-phase" id="syncPhase" aria-live="polite"></p>
+            <span class="sync-live-bar" aria-hidden="true"><i id="syncBar"></i></span>
+            <p class="sync-live-note" id="syncNote">进度都存在这台设备上，关掉页面也不会丢，下次打开接着查。</p>
+          </div>
+        </div>
         <div id="heroStats" class="hero-stats" hidden aria-label="档案概览">
           <div class="hero-stat-grid">
             <div class="hero-stat"><b class="num" id="statSongs"></b><span>首歌</span></div>
@@ -125,6 +134,10 @@
             <button type="button" id="orderNewest" aria-pressed="true">最新在前</button>
             <button type="button" id="orderOldest" aria-pressed="false">从头讲起</button>
           </div>
+          <div class="segmented view-toggle" role="group" aria-label="显示方式">
+            <button type="button" id="viewList" aria-pressed="true">列表</button>
+            <button type="button" id="viewWall" aria-pressed="false">封面墙</button>
+          </div>
           <button type="button" class="button ghost capsule-launch" id="capsuleButton" hidden>时光胶囊</button>
         </div>
       </div>
@@ -169,6 +182,10 @@
         <button type="button" id="themeDark" data-theme-opt="dark" aria-pressed="false">深色</button>
       </div>
     </section>
+    <section class="set-group" aria-labelledby="setPlayTitle">
+      <h3 id="setPlayTitle">播放</h3>
+      <label class="switch-row" id="loudnessRow"><span><b>音量均衡</b><small id="loudnessNote">按网易云给每首歌测好的响度，把太响的歌调小，切歌不再忽大忽小</small></span><input type="checkbox" id="optLoudness" role="switch" checked></label>
+    </section>
     <section class="set-group" id="setSync" aria-labelledby="setSyncTitle">
       <h3 id="setSyncTitle">同步</h3>
       <label class="switch-row"><span><b>打开就同步</b><small>只补新的，查过的不再查</small></span><input type="checkbox" id="optAuto" role="switch" checked></label>
@@ -211,10 +228,18 @@
     <button type="button" class="dialog-close icon-button" id="closeLogin" aria-label="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
     <p class="kicker">连接网易云音乐</p>
     <h2 id="loginTitle">扫一扫，剩下的交给初听</h2>
-    <p class="dialog-copy">用网易云音乐 App 扫一扫，在手机上点确认就好。</p>
+    <p class="dialog-copy" id="loginCopy">用网易云音乐 App 扫一扫，在手机上点确认就好。</p>
+    <ol class="qr-steps" id="qrSteps" hidden>
+      <li><b>存下这张码</b><span>点下面「存到相册」，或长按二维码</span></li>
+      <li><b>网易云里扫相册</b><span>打开网易云音乐的「扫一扫」，从相册选这张图</span></li>
+      <li><b>回到这里</b><span>在 App 里点确认，回来就连上了</span></li>
+    </ol>
     <div class="qr-frame"><img id="loginQr" class="login-qr" width="240" height="240" alt="网易云音乐登录二维码" hidden><span class="qr-placeholder" aria-hidden="true"></span></div>
     <p id="loginStatus" class="login-status" role="status">正在生成二维码…</p>
-    <button type="button" class="button ghost" id="refreshQr">换一张二维码</button>
+    <div class="qr-actions">
+      <button type="button" class="button primary" id="saveQr" hidden>存到相册</button>
+      <button type="button" class="button ghost" id="refreshQr">换一张二维码</button>
+    </div>
   </dialog>
 
   <dialog id="songDialog" aria-labelledby="detailName">

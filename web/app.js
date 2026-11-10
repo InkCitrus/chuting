@@ -87,7 +87,7 @@ const stored = (key, fallback) => { try { return JSON.parse(localStorage.getItem
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)) } catch {} }
 // v3: only liked songs are synced by default; older saved choices keep just the auto-sync switch.
 const savedSettings = stored('chuting-settings', {})
-const settings = { auto: true, recent: false, playlists: false, history: false, likedOnly: false,
+const settings = { auto: true, recent: false, playlists: false, history: false, likedOnly: false, loudness: true,
   ...(savedSettings.v === 3 ? savedSettings : { auto: savedSettings.auto ?? true }), v: 3 }
 const LIKED = '喜欢的歌曲'
 const wideScope = () => settings.recent || settings.playlists || settings.history
@@ -95,10 +95,14 @@ const wideScope = () => settings.recent || settings.playlists || settings.histor
 const pendingNow = stats => (wideScope() || stats.pending_liked == null ? stats.pending : stats.pending_liked) || 0
 let storedOrder = 'newest'
 try { storedOrder = localStorage.getItem('chuting-order') === 'oldest' ? 'oldest' : 'newest' } catch {}
+let storedLayout = 'list'
+try { storedLayout = localStorage.getItem('chuting-layout') === 'wall' ? 'wall' : 'list' } catch {}
+const SONG_SEL = '.song, .wall-song'
+const wallOn = () => state.layout === 'wall' && !state.query.trim()
 
 const state = {
   account: null, status: null, initialized: false, loading: true, error: '', local: false, online: false, offline: !navigator.onLine,
-  all: [], results: null, query: '', terms: [], order: storedOrder, request: 0, autoTried: false,
+  all: [], results: null, query: '', terms: [], order: storedOrder, layout: storedLayout, request: 0, autoTried: false,
   view: [], chapters: [], rendered: 0, active: '', counted: false, current: -1,
 }
 let player = null
@@ -459,6 +463,7 @@ function renderStatus() {
   }
   if (!has || !stats.available) renderHeroStats(null)
   renderHeroCapsule()
+  renderSyncLive()
 
   const line = $('syncLine')
   line.hidden = !has || (!run && !stats.discovered)
@@ -474,6 +479,71 @@ function renderStatus() {
   if (shareButton) shareButton.hidden = !state.all.length
   renderSettings()
   player?.setOffline(state.offline ? 'offline' : has && !online ? 'login' : null)
+}
+
+/* ---------- 同步进行时 ---------- */
+// While a sync runs, the hero shows it working: the newest finds drop onto a small tilted stack of square
+// covers, the count of new firsts rolls up, and a pause (NetEase asking us to slow down, or the
+// automatic resume after a busy spell) counts down instead of sitting frozen.
+const syncLive = { seen: null, arrivals: [], tick: 0, shown: 0 }
+const SYNC_TILES = 5
+const TILT = [-6, 3, -2, 5, -4]
+function clockText(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000))
+  return s >= 60 ? `${Math.floor(s / 60)} 分 ${String(s % 60).padStart(2, '0')} 秒` : `${s} 秒`
+}
+function renderSyncLive() {
+  const box = $('syncLive')
+  if (!box) return
+  const run = state.status?.run
+  const busyWait = run?.busy && run.status === 'failed' && run.resume_ms > Date.now()
+  const on = Boolean(state.account) && (running() || busyWait)
+  box.hidden = !on
+  clearTimeout(syncLive.tick)
+  if (!on) { syncLive.seen = null; syncLive.arrivals = []; return }
+  // Songs already in the archive when this run started are not "new".
+  if (!syncLive.seen) syncLive.seen = new Set(state.all.map(e => e.song_id))
+  for (const e of state.all) if (!syncLive.seen.has(e.song_id)) { syncLive.seen.add(e.song_id); syncLive.arrivals.push(e) }
+  const wall = $('syncWall'), latest = syncLive.arrivals.slice(-SYNC_TILES)
+  const ids = latest.map(e => e.song_id).join('|')
+  if (wall.dataset.ids !== ids || !wall.children.length) {
+    const had = new Set((wall.dataset.ids || '').split('|'))
+    wall.replaceChildren()
+    for (let i = 0; i < SYNC_TILES; i++) {
+      const e = latest[i]
+      const el = e ? tile(e, 'sync-tile', 160) : node('span', 'sync-tile is-empty')
+      if (e && !had.has(e.song_id) && wall.dataset.ids !== undefined) el.classList.add('is-new')
+      el.style.setProperty('--i', String(i)); el.style.setProperty('--r', `${TILT[i]}deg`)
+      wall.append(el)
+    }
+    wall.dataset.ids = ids
+  }
+  const found = run?.found || 0
+  const num = $('syncFound')
+  if (Number(num.dataset.v || 0) !== found) {
+    const from = Number(num.dataset.v || 0)
+    num.dataset.v = String(found)
+    if (motion && !reduced.matches && found > from) {
+      const start = performance.now(), dur = 700
+      const step = now => { const t = Math.min(1, (now - start) / dur); num.textContent = n(Math.round(from + (found - from) * easeOut(t))); if (t < 1 && num.dataset.v === String(found)) requestAnimationFrame(step) }
+      requestAnimationFrame(step)
+    } else num.textContent = n(found)
+  }
+  $('syncFoundLabel').textContent = found ? '首初听，这次新找到' : '首初听，正在找'
+  const now = Date.now()
+  const cooling = running() && run.cooldown_until > now
+  let phase = run?.phase || '正在准备…', mode = 'run'
+  if (busyWait) { phase = `网易云有点忙，${clockText(run.resume_ms - now)}后自动接着查`; mode = 'wait' }
+  else if (cooling) { phase = `网易云说慢点，${clockText(run.cooldown_until - now)}后接着查`; mode = 'wait' }
+  else if (run?.total) phase = `已问过 ${n(run.queried || 0)} / ${n(run.total)} 首`
+  box.dataset.mode = mode
+  $('syncPhase').textContent = phase
+  const pct = busyWait || cooling
+    ? 1 - Math.max(0, (busyWait ? run.resume_ms : run.cooldown_until) - now) / Math.max(1000, (busyWait ? run.resume_ms : run.cooldown_until) - (run.updated_ms || now))
+    : run?.total ? (run.queried || 0) / run.total : 0
+  $('syncBar').style.transform = `scaleX(${Math.max(0, Math.min(1, pct)).toFixed(3)})`
+  // Countdowns tick once a second; the regular status poll covers the rest.
+  if ((busyWait || cooling) && !document.hidden) syncLive.tick = setTimeout(renderSyncLive, 1000)
 }
 
 /* ---------- 高光轮播 ---------- */
@@ -696,7 +766,7 @@ function buildChapters(events) {
 }
 // Remembers the first visible song so a background refresh (e.g. during sync) does not move the page.
 function scrollAnchor() {
-  for (const el of $('timeline').querySelectorAll('.song')) {
+  for (const el of $('timeline').querySelectorAll(SONG_SEL)) {
     const top = el.getBoundingClientRect().top
     if (top > innerHeight) return null
     if (top >= 80) return { id: el.dataset.song, top }
@@ -721,10 +791,13 @@ function renderTimeline(options = {}) {
   lede.hidden = state.loading || Boolean(search) || !state.all.length
   if (!lede.hidden) rotate(lede, timelineLedes(state.all, state.order), { interval: 11000, delay: 5200 })
   for (const [id, order] of [['orderNewest', 'newest'], ['orderOldest', 'oldest']]) $(id).setAttribute('aria-pressed', String(state.order === order))
+  for (const [id, layout] of [['viewList', 'list'], ['viewWall', 'wall']]) $(id).setAttribute('aria-pressed', String(state.layout === layout))
+  $('viewWall').disabled = Boolean(search) // search results stay a list so the matches can be highlighted
   chapterObserver?.disconnect()
   const timeline = $('timeline')
   timeline.setAttribute('aria-busy', String(state.loading))
   timeline.classList.toggle('compact', Boolean(search))
+  timeline.classList.toggle('is-wall', wallOn())
   timeline.replaceChildren()
   renderScrubber()
   if (state.loading) {
@@ -740,7 +813,7 @@ function renderTimeline(options = {}) {
   }
   renderMore(undefined, { instant: keep, until: previous })
   if (anchor) {
-    const el = timeline.querySelector(`.song[data-song="${anchor.id}"]`)
+    const el = timeline.querySelector(`[data-song="${anchor.id}"]`)
     if (el) scrollBy(0, el.getBoundingClientRect().top - anchor.top)
   }
 }
@@ -776,10 +849,42 @@ function renderChapter(chapter) {
   sentence(story, monthStory(events, search))
   text.append(title, story)
   head.append(numeral, text)
+  section.append(head, wallOn() ? renderWall(chapter) : renderDays(chapter))
+  return section
+}
+function renderDays(chapter) {
   const days = node('ol', 'days')
   for (const day of chapter.days) days.append(renderDay(day, state.terms))
-  section.append(head, days)
-  return section
+  return days
+}
+// Cover wall: one square per first listen, the month as a contact sheet. Each tile carries the day it
+// was first heard so the wall still reads as a timeline; tapping opens the same detail sheet.
+function renderWall(chapter) {
+  const grid = node('ol', 'wall reveal')
+  let i = 0
+  for (const day of chapter.days) {
+    const [, , d] = ymd(day.date)
+    day.songs.forEach((event, k) => {
+      const li = node('li')
+      const button = node('button', 'wall-song')
+      button.type = 'button'
+      button.dataset.index = String(event.index)
+      button.dataset.song = String(event.song_id)
+      button.style.setProperty('--i', String(Math.min(i++, 14)))
+      button.setAttribute('aria-label', `${Number(d)} 日 ${event.time}，${event.name}，${event.artists || '歌手未知'}，查看详情`)
+      const cover = tile(event, 'wall-cover', 240, false, true)
+      cover.setAttribute('aria-hidden', 'true')
+      const cap = node('span', 'wall-cap')
+      cap.setAttribute('aria-hidden', 'true')
+      cap.append(node('span', 'wall-name', event.name))
+      button.append(cover, cap)
+      if (k === 0) { const stamp = node('span', 'wall-day', String(Number(d))); stamp.setAttribute('aria-hidden', 'true'); button.append(stamp) }
+      if (day.date === today && k === 0) button.classList.add('is-today')
+      li.append(button)
+      grid.append(li)
+    })
+  }
+  return grid
 }
 function renderDay(day, terms) {
   const [, m, d] = ymd(day.date)
@@ -989,10 +1094,10 @@ function locateInTimeline(event) {
     if (state.query && !state.view.some(e => e.song_id === song.song_id)) clearSearch()
     const key = song.date.slice(0, 7)
     if (!$(`m-${key}`)) renderMore(key)
-    const el = $('timeline').querySelector(`.song[data-song="${song.song_id}"]`)
+    const el = $('timeline').querySelector(`[data-song="${song.song_id}"]`)
     if (!el) { toast('没能在时间线里找到这首'); return }
     el.closest('.chapter')?.querySelectorAll('.reveal').forEach(node => node.classList.add('shown'))
-    $('timeline').querySelectorAll('.song.is-locate').forEach(node => node.classList.remove('is-locate'))
+    $('timeline').querySelectorAll('.is-locate').forEach(node => node.classList.remove('is-locate'))
     el.classList.add('is-locate')
     el.scrollIntoView({ behavior: motion ? 'smooth' : 'auto', block: 'center' })
     try { el.focus({ preventScroll: true }) } catch {}
@@ -2303,24 +2408,82 @@ async function connect() {
   }
   catch (err) { if (err.message !== '已取消连接') fail(err); renderStatus(); return false }
 }
+// A phone (touch first, no hover) is usually the device the NetEase app is on, so it cannot scan its own
+// screen. There the code is turned into a PNG that can be saved to the album and scanned from it.
+const samePhone = () => matchMedia('(hover: none) and (pointer: coarse)').matches
+const qrSave = { file: null, png: '' }
+async function rasterQr(src) {
+  const img = new Image()
+  img.decoding = 'async'
+  img.src = src
+  await img.decode()
+  // Square, like the frame it sits in: the code on top, two short lines under it.
+  const size = 720, qr = 540
+  const canvas = document.createElement('canvas')
+  canvas.width = size; canvas.height = size
+  const g = canvas.getContext('2d')
+  g.fillStyle = '#fff'; g.fillRect(0, 0, size, size)
+  g.imageSmoothingEnabled = false
+  g.drawImage(img, (size - qr) / 2, 36, qr, qr)
+  g.fillStyle = '#1b1916'; g.textAlign = 'center'
+  g.font = '600 30px "Noto Serif SC", "Songti SC", serif'
+  g.fillText('初听 · 网易云「扫一扫」从相册选这张', size / 2, 632)
+  g.fillStyle = '#8a8178'; g.font = '24px system-ui, sans-serif'
+  g.fillText('几分钟内有效，过期了回初听换一张', size / 2, 676)
+  const png = canvas.toDataURL('image/png')
+  const blob = await (await fetch(png)).blob()
+  return { png, file: new File([blob], 'chuting-login-qr.png', { type: 'image/png' }) }
+}
+async function prepareQrSave(src) {
+  qrSave.file = null; qrSave.png = ''
+  $('saveQr').hidden = true
+  if (!samePhone()) return
+  try {
+    const out = await rasterQr(src)
+    if ($('loginQr').dataset.src !== src) return
+    Object.assign(qrSave, out)
+    // The PNG goes on screen too, so a long press offers 存储到照片 (an SVG would not).
+    $('loginQr').src = out.png
+    $('saveQr').hidden = false
+  } catch { /* keep the SVG; long press and a second device still work */ }
+}
+async function saveQr() {
+  if (!qrSave.file) return
+  try {
+    if (navigator.canShare?.({ files: [qrSave.file] })) { await navigator.share({ files: [qrSave.file] }); toast('存好了就去网易云扫一扫，选相册里这张'); return }
+  } catch (err) { if (err?.name === 'AbortError') return }
+  const link = document.createElement('a')
+  link.href = qrSave.png; link.download = qrSave.file.name
+  document.body.append(link); link.click(); link.remove()
+  toast('也可以长按二维码，存到相册')
+}
+$('saveQr').addEventListener('click', saveQr)
 function qrLogin() {
   const dialog = $('loginDialog')
+  const phone = samePhone()
+  dialog.classList.toggle('is-same-phone', phone)
+  $('qrSteps').hidden = !phone
+  $('loginCopy').textContent = phone ? '网易云就在这台手机上？存下二维码，在 App 里从相册扫就行。也可以用另一台设备直接扫。' : '用网易云音乐 App 扫一扫，在手机上点确认就好。'
   openModal(dialog)
   return new Promise((resolve, reject) => {
-    let ticket, timer, generation = 0, done = false
+    let ticket, timer, generation = 0, done = false, inflight = false
     const status = (text, tone = '') => { $('loginStatus').textContent = text; $('loginStatus').dataset.tone = tone }
-    const cleanup = () => { done = true; clearTimeout(timer); $('refreshQr').removeEventListener('click', refresh); dialog.removeEventListener('close', cancel) }
+    // Back from the NetEase app: check at once instead of waiting out a throttled background timer.
+    const back = () => { if (!document.hidden && ticket && !done && !inflight) { clearTimeout(timer); poll(generation) } }
+    document.addEventListener('visibilitychange', back)
+    const cleanup = () => { done = true; clearTimeout(timer); $('refreshQr').removeEventListener('click', refresh); dialog.removeEventListener('close', cancel); document.removeEventListener('visibilitychange', back) }
     const cancel = () => { cleanup(); reject(new Error('已取消连接')) }
     dialog.addEventListener('close', cancel, { once: true })
     async function poll(version) {
-      if (done || generation !== version) return
+      if (done || generation !== version || inflight) return
+      inflight = true
       try {
-        const result = await remote('/api/auth/check', { ticket })
+        const result = await remote('/api/auth/check', { ticket }).finally(() => { inflight = false })
         if (done || generation !== version) return
         if (result.code === 803) { status('连上啦', 'ok'); cleanup(); closeDialog(dialog); resolve(result.account); return }
-        if (result.code === 802) status('已扫码，请在手机上点「确认登录」', 'ok')
-        else if (result.code === 800) { status('二维码过期了，换一张再扫', 'warn'); $('loginQr').classList.add('expired') }
-        else status('打开网易云音乐 App，扫一扫')
+        if (result.code === 802) status(samePhone() ? '扫到了，在网易云里点「确认登录」再回来' : '已扫码，请在手机上点「确认登录」', 'ok')
+        else if (result.code === 800) { status(samePhone() ? '二维码过期了，换一张，再存一次' : '二维码过期了，换一张再扫', 'warn'); $('loginQr').classList.add('expired'); $('saveQr').hidden = true }
+        else status(samePhone() ? '存好后去网易云扫相册里的这张图' : '打开网易云音乐 App，扫一扫')
         if (result.code !== 800) timer = setTimeout(() => poll(version), 2000)
       } catch (err) { if (!done && generation === version) status(err.message + '，可以换一张二维码重试', 'warn') }
     }
@@ -2330,7 +2493,9 @@ function qrLogin() {
       try {
         const result = await remote('/api/auth/key', {})
         if (done || generation !== version) return
-        ticket = result.ticket; $('loginQr').src = result.image; $('loginQr').hidden = false; status('打开网易云音乐 App，扫一扫')
+        ticket = result.ticket; $('loginQr').src = result.image; $('loginQr').dataset.src = result.image; $('loginQr').hidden = false
+        status(samePhone() ? '存好后去网易云扫相册里的这张图' : '打开网易云音乐 App，扫一扫')
+        prepareQrSave(result.image)
         timer = setTimeout(() => poll(version), 2000)
       } catch (err) { if (!done && generation === version) status(err.message, 'warn') }
     }
@@ -2426,6 +2591,13 @@ function setOrder(order) {
   if (state.order === order) return
   const apply = () => { state.order = order; renderStatus(); renderTimeline() }
   try { localStorage.setItem('chuting-order', order) } catch {}
+  if (motion && document.startViewTransition) document.startViewTransition(apply)
+  else apply()
+}
+function setLayout(layout) {
+  if (state.layout === layout) return
+  const apply = () => { state.layout = layout; renderTimeline({ keep: true }) }
+  try { localStorage.setItem('chuting-layout', layout) } catch {}
   if (motion && document.startViewTransition) document.startViewTransition(apply)
   else apply()
 }
@@ -2561,8 +2733,27 @@ async function copyShareText() {
     toast('已复制')
   } catch { toast('复制失败了', 'error') }
 }
-function saveShare() {
+// The poster is shown as an <img> with a data: URL (the CSP blocks blob: images), so a long press on
+// iPhone offers 「存储到照片」. The save button on a phone opens the share sheet with just the image,
+// which also has 「存储图像」; desktops get a normal download.
+const blobToDataUrl = blob => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result)
+  reader.onerror = () => reject(reader.error)
+  reader.readAsDataURL(blob)
+})
+const within = (promise, ms, fallback) => Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(fallback), ms))])
+async function saveShare() {
   if (!shareState.blob) return
+  if (samePhone() && shareMethod(shareState.blob) === 'files') {
+    try {
+      await navigator.share({ files: [new File([shareState.blob], shareState.name, { type: 'image/png' })] })
+      return
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      // fall through to the download
+    }
+  }
   const url = URL.createObjectURL(shareState.blob)
   const link = document.createElement('a')
   link.href = url
@@ -2592,34 +2783,53 @@ async function nativeShare() {
   }
   await copyShareText()
 }
+function shareSkeleton() {
+  const box = node('div', 'share-canvas share-skeleton')
+  box.setAttribute('aria-hidden', 'true')
+  const grid = node('div', 'share-skeleton-wall')
+  for (let i = 0; i < 9; i++) grid.append(node('i'))
+  box.append(node('b'), node('span'), node('span'), grid)
+  return box
+}
 async function openShare() {
-  const top = artistRanks(state.all)[0]
-  const portrait = top?.[0] ? await fetchArtistPortrait(top[0]) : ''
-  const payload = sharePayload({ events: state.all }, { portrait })
-  if (!payload) return
+  if (!state.all.length) return
   const job = ++shareJob
-  shareState.text = payload.text
+  const dialog = $('shareDialog')
+  const status = $('shareStatus')
+  const phone = samePhone()
+  shareState.text = ''
   shareState.blob = null
+  status.hidden = false
+  status.textContent = '正在排版海报…'
+  $('shareStage').replaceChildren(shareSkeleton())
+  $('shareStage').setAttribute('aria-busy', 'true')
+  $('shareSave').disabled = true
+  $('shareSave').textContent = phone ? '存到相册' : '保存'
+  // Open straight away; the artist portrait lookup is a network round trip and used to delay the tap.
+  openModal(dialog)
+  const top = artistRanks(state.all)[0]
+  const portrait = top?.[0] ? await within(fetchArtistPortrait(top[0]).catch(() => ''), 2500, '') : ''
+  if (job !== shareJob || !dialog.open) return
+  const payload = sharePayload({ events: state.all }, { portrait })
+  if (!payload) { closeDialog(dialog); return }
+  shareState.text = payload.text
   shareState.name = payload.poster.rangeStart === payload.poster.rangeEnd
     ? `chuting-${payload.poster.rangeStart}.png`
     : `chuting-${payload.poster.rangeStart}-${payload.poster.rangeEnd}.png`
-  const dialog = $('shareDialog')
-  const status = $('shareStatus')
-  status.hidden = false
-  status.textContent = '正在排版海报…'
-  $('shareStage').replaceChildren()
-  $('shareStage').setAttribute('aria-busy', 'true')
-  $('shareSave').disabled = true
-  openModal(dialog)
   try {
-    const { canvas, blob } = await renderPoster(payload.poster)
+    const { blob } = await renderPoster(payload.poster)
+    const src = await blobToDataUrl(blob)
     if (job !== shareJob || !dialog.open) return
-    canvas.className = 'share-canvas'
-    canvas.setAttribute('role', 'img')
-    canvas.setAttribute('aria-label', `初听海报，${payload.poster.songs} 首歌`)
-    $('shareStage').replaceChildren(canvas)
+    const img = new Image()
+    img.className = 'share-canvas share-image'
+    img.alt = `初听海报，${payload.poster.songs} 首歌`
+    img.src = src
+    await img.decode().catch(() => {})
+    if (job !== shareJob || !dialog.open) return
+    $('shareStage').replaceChildren(img)
     $('shareStage').setAttribute('aria-busy', 'false')
-    status.hidden = true
+    status.hidden = !phone
+    status.textContent = phone ? '长按海报也能存到相册' : ''
     shareState.blob = blob
     $('shareSave').disabled = false
   } catch {
@@ -2677,8 +2887,10 @@ $('nextSong').addEventListener('click', () => stepSong(1))
 $('songDialog').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') stepSong(-1); if (e.key === 'ArrowRight') stepSong(1) })
 $('orderNewest').addEventListener('click', () => setOrder('newest'))
 $('orderOldest').addEventListener('click', () => setOrder('oldest'))
+$('viewList').addEventListener('click', () => setLayout('list'))
+$('viewWall').addEventListener('click', () => setLayout('wall'))
 $('timeline').addEventListener('click', e => {
-  const button = e.target.closest('.song')
+  const button = e.target.closest(SONG_SEL)
   if (button) showSong(state.view[Number(button.dataset.index)], button)
 })
 $('scrubber').addEventListener('click', e => { const b = e.target.closest('.scrub-month'); if (b) jumpTo(b.dataset.month) })
@@ -2779,6 +2991,20 @@ player = createPlayer({
 })
 player.setActions(() => playRelative(-1), () => playRelative(1))
 if (!finePointer) $('volume').closest('.player-vol').hidden = true
+// 音量均衡 works through audio.volume. iOS WebKit ignores volume, so there the switch says so and stays off.
+{
+  const canLevel = playerMod?.volumeAdjustable ? playerMod.volumeAdjustable() : false
+  const box = $('optLoudness')
+  box.checked = canLevel && settings.loudness
+  box.disabled = !canLevel
+  if (!canLevel) $('loudnessNote').textContent = 'iPhone 上浏览器不让网页调音量，这项暂时用不了'
+  player.setNormalize?.(canLevel && settings.loudness)
+  box.addEventListener('change', e => {
+    settings.loudness = e.target.checked; save('chuting-settings', settings)
+    player.setNormalize?.(settings.loudness)
+    toast(settings.loudness ? '音量均衡开了，太响的歌会调小一点' : '音量均衡关了')
+  })
+}
 addEventListener('offline', () => { state.offline = true; state.online = false; renderStatus() })
 backendReady.then(backend => {
   state.local = backend.local
