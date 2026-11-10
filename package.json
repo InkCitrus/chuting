@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "初听：本机运行的网易云音乐初听日历",
+  "license": "Apache-2.0",
   "scripts": {
     "start": "python3 -m music_calendar serve",
     "test": "python3 -m unittest discover -s tests -v && node --test tests/*.test.mjs",
