@@ -96,20 +96,56 @@ export function playErrorMessage(err, _mediaError, answer) {
 // (Safari and Chrome on iPhone), so the real src may play after the network wait.
 export const PRIME_SRC = 'data:audio/wav;base64,UklGRgQCAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YeABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA='
 
+// 音量均衡. NetEase returns a per-file ReplayGain-style `gain` (dB, usually -10…-4 for modern masters) and a
+// linear `peak`. Every track is brought to about -14 LUFS (gain + 4 dB, the level most streaming apps use).
+// It only ever turns a track down: a quiet track would need boosting past its peak, which would clip.
+export const LOUDNESS_PREAMP_DB = 4
+export const LOUDNESS_FLOOR_DB = -12
+// A file NetEase has not measured (gain missing or 0) gets the typical correction, so it does not jump
+// out ~4 dB louder than its measured neighbours.
+export const LOUDNESS_UNKNOWN_DB = -3
+export function loudnessDb(answer, preamp = LOUDNESS_PREAMP_DB) {
+  const gain = Number(answer?.gain)
+  if (!Number.isFinite(gain) || gain === 0) return LOUDNESS_UNKNOWN_DB
+  const peak = Number(answer?.peak)
+  const headroom = Number.isFinite(peak) && peak > 0 ? Math.min(0, -20 * Math.log10(peak)) : 0
+  return Math.max(LOUDNESS_FLOOR_DB, Math.min(headroom, gain + preamp)) + 0 // + 0: never -0
+}
+export function loudnessFactor(answer, preamp) { return 10 ** (loudnessDb(answer, preamp) / 20) }
+// iOS WebKit (Safari and Chrome on iPhone) ignores HTMLMediaElement.volume: setting it reads back as 1.
+// There 音量均衡 would need Web Audio, which stops playback when the screen locks, so it is not used.
+export function volumeAdjustable(make = () => new Audio()) {
+  try { const a = make(); a.volume = 0.5; return Math.abs(a.volume - 0.5) < 0.01 } catch { return false }
+}
+
 export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onChange, onUnplayable }) {
   const audio = new Audio()
   audio.preload = 'auto'
   audio.playsInline = true
   try { audio.setAttribute('playsinline', '') } catch {}
-  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, blocked: false, offline: false, seeking: false, replacing: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0 }
+  const state = { event: null, answer: null, shown: null, error: '', loading: false, retried: false, failed: false, blocked: false, offline: false, seeking: false, replacing: false, gen: 0, hosts: [], hostIndex: 0, gain: 1, userVolume: 1, pendingFade: 0, norm: 1, normalize: false }
   let fadeRaf = 0
   let mediaEpoch = 0
   let recovery = null
   let lastJob = null
   function applyGain(g) {
     state.gain = Math.min(1, Math.max(0, g))
-    audio.volume = Math.min(1, Math.max(0, state.userVolume * state.gain))
+    audio.volume = Math.min(1, Math.max(0, state.userVolume * state.gain * state.norm))
   }
+  // Loudness for the current answer; a change mid-song glides over ~400ms instead of jumping.
+  let normRaf = 0
+  function setNorm(to, ms = 0) {
+    cancelAnimationFrame(normRaf)
+    if (!ms || typeof requestAnimationFrame !== 'function') { state.norm = to; applyGain(state.gain); return }
+    const from = state.norm, start = performance.now()
+    const step = now => {
+      const t = Math.min(1, (now - start) / ms)
+      state.norm = from + (to - from) * t; applyGain(state.gain)
+      if (t < 1) normRaf = requestAnimationFrame(step)
+    }
+    normRaf = requestAnimationFrame(step)
+  }
+  const normFor = answer => state.normalize ? loudnessFactor(answer) : 1
   function fadeGain(to, ms = 320) {
     cancelAnimationFrame(fadeRaf)
     const from = state.gain, dur = Math.max(0, Number(ms) || 0)
@@ -320,6 +356,7 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       const answer = await requestUrl(event, fallback, gen)
       if (gen !== state.gen) return stale()
       state.answer = answer
+      setNorm(normFor(answer))
       if (!answer.url) {
         state.pendingFade = 0; audio.muted = false; applyGain(1); state.loading = false; state.failed = true
         clearSrc()
@@ -509,6 +546,12 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
       } catch {}
     },
     duck(ms = 280) { return fadeGain(0, ms) },
+    // 音量均衡 on/off; the playing song glides to its new level.
+    setNormalize(on) {
+      state.normalize = Boolean(on)
+      setNorm(state.answer?.url ? normFor(state.answer) : 1, audio.paused ? 0 : 400)
+    },
+    get loudness() { return { on: state.normalize, factor: state.norm, db: state.normalize && state.answer ? loudnessDb(state.answer) : 0 } },
     get note() {
       if (state.offline) return PLAYER_LINES[state.offline] || PLAYER_LINES.offline
       if (state.error) return state.error

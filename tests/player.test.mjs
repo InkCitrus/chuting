@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPlayer, PRIME_SRC, PLAYER_LINES, PLAY_QUERY, FALLBACK_QUERY, playErrorMessage, audioHosts, hardAnswer, cloudUnplayableMessage, browserCanPlay } from '../web/player.js'
+import { createPlayer, PRIME_SRC, PLAYER_LINES, PLAY_QUERY, FALLBACK_QUERY, playErrorMessage, audioHosts, hardAnswer, cloudUnplayableMessage, browserCanPlay, loudnessDb, loudnessFactor, volumeAdjustable, LOUDNESS_UNKNOWN_DB } from '../web/player.js'
 
 class FakeAudio extends EventTarget {
   constructor() {
@@ -693,6 +693,53 @@ test('job follows auto-skip so a waiting page reads the result of the song that 
     const latest = await player.job
     assert.equal(latest.song_id, 'good')
     assert.equal(latest.ok, true)
+  } finally {
+    env.restore()
+  }
+})
+
+test('音量均衡 turns loud tracks down to about -14 LUFS and never boosts past the peak', () => {
+  assert.equal(loudnessDb({ gain: -8.72, peak: 1 }).toFixed(2), '-4.72')
+  assert.equal(loudnessDb({ gain: -6.3, peak: 1 }).toFixed(2), '-2.30')
+  // A quiet master would need a boost; with peak 1 there is no headroom, so it stays at 0 dB.
+  assert.equal(loudnessDb({ gain: -1.5, peak: 1 }), 0)
+  // Real headroom (peak below full scale) still caps the boost at 0 dB: it only ever turns down.
+  assert.equal(loudnessDb({ gain: 2, peak: 0.5 }), 0)
+  assert.equal(loudnessDb({ gain: -40, peak: 1 }), -12)
+  // Not measured (missing or 0): the typical correction, so it does not stand out.
+  assert.equal(loudnessDb({ gain: 0 }), LOUDNESS_UNKNOWN_DB)
+  assert.equal(loudnessDb({}), LOUDNESS_UNKNOWN_DB)
+  assert.ok(Math.abs(loudnessFactor({ gain: -10, peak: 1 }) - 10 ** (-6 / 20)) < 1e-9)
+})
+test('volumeAdjustable is false where volume reads back as 1 (iOS WebKit)', () => {
+  assert.equal(volumeAdjustable(() => ({ volume: 1 })), true)
+  const ios = { get volume() { return 1 }, set volume(_v) {} }
+  assert.equal(volumeAdjustable(() => ios), false)
+  assert.equal(volumeAdjustable(() => { throw new Error('no audio') }), false)
+})
+test('音量均衡 scales the element volume per track and can be switched off mid-song', async () => {
+  const env = install('probably')
+  try {
+    const { els, mini } = mount()
+    const player = createPlayer({
+      els, mini,
+      getUrl: async () => ({ url: 'https://m801.music.126.net/ok.mp3', type: 'mp3', gain: -10, peak: 1 }),
+      coverFor: () => null, onEnded() {}, onOpen() {}
+    })
+    // Off until the page turns it on, so the element plays at full volume.
+    await player.play({ song_id: '1', name: 'a' })
+    assert.equal(env.audio().volume, 1)
+    player.setNormalize(true)
+    await new Promise(r => setTimeout(r, 520))
+    assert.ok(Math.abs(env.audio().volume - 10 ** (-6 / 20)) < 1e-6)
+    assert.equal(player.loudness.on, true)
+    player.setNormalize(false)
+    await new Promise(r => setTimeout(r, 520))
+    assert.equal(env.audio().volume, 1)
+    // A new track picks up its own level as it loads.
+    player.setNormalize(true)
+    await player.play({ song_id: '2', name: 'b' })
+    assert.ok(Math.abs(env.audio().volume - 10 ** (-6 / 20)) < 1e-6)
   } finally {
     env.restore()
   }

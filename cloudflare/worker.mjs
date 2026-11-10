@@ -171,6 +171,11 @@ export function playable(body, id) {
     trial
   }
   if (encodeType) out.encodeType = encodeType
+  // Track loudness NetEase stores with the file (ReplayGain-style dB, linear peak); the page uses it for
+  // 音量均衡. 0 means "not measured", so only a real value is passed on.
+  const gain = Number(item.gain), peak = Number(item.peak)
+  if (Number.isFinite(gain) && gain !== 0 && Math.abs(gain) <= 30) out.gain = Math.round(gain * 100) / 100
+  if (Number.isFinite(peak) && peak > 0 && peak <= 4) out.peak = Math.round(peak * 10000) / 10000
   return out
 }
 export function fileExt(name) {

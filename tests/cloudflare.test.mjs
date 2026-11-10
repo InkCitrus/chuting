@@ -261,6 +261,16 @@ test('playable reads a download-url object payload and encodeType', () => {
   assert.equal(body.url, 'https://m7.music.126.net/x.mp3')
   assert.equal(body.type, 'mp3')
   assert.equal(body.encodeType, 'mp3')
+  assert.equal('gain' in body, false)
+})
+
+test('playable passes NetEase loudness (gain, peak) through, but not a 0 that means unmeasured', () => {
+  const loud = playable({ data: [{ id: 7, url: 'http://m7.music.126.net/x.mp3', type: 'mp3', gain: -8.7207, peak: 1 }] }, 7)
+  assert.equal(loud.gain, -8.72)
+  assert.equal(loud.peak, 1)
+  const flat = playable({ data: [{ id: 7, url: 'http://m7.music.126.net/x.mp3', type: 'mp3', gain: 0, peak: 0 }] }, 7)
+  assert.equal('gain' in flat, false)
+  assert.equal('peak' in flat, false)
 })
 
 test('cloudHint reads pc.sid, the uploaded filename, and cloud flags', () => {

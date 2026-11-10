@@ -99,8 +99,11 @@ export class BrowserSync {
     this.remember()
   }
   async coolDown(times) {
-    if (this.run) await this.phase(`网易云说慢点，歇 ${Math.round(this.cooldown * times / 1000)} 秒再来…`).catch(() => {})
-    await this.wait(this.cooldown * times)
+    const ms = this.cooldown * times
+    // cooldown_until lets the page count the pause down instead of showing a frozen line.
+    if (this.run) { this.run.cooldown_until = Date.now() + ms; await this.phase(`网易云说慢点，歇 ${Math.round(ms / 1000)} 秒再来…`).catch(() => {}) }
+    await this.wait(ms)
+    if (this.run) delete this.run.cooldown_until
   }
   // Checks the account and refreshes nickname/avatar, at most once a day.
   async profile(account) {
