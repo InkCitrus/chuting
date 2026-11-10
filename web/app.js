@@ -63,6 +63,8 @@ const sampleTrack = travelMod?.sampleTrack || null
 // and z-index at ring wraps. Any per-frame rAF makes Blink/WebKit restyle every
 // animated card each frame, so the flight deliberately has none.
 const FLIGHT_TICK_MS = 66
+// How long a phase may overrun its planned duration before it is ended anyway.
+const TRAVEL_DEADLINE_SLACK_MS = 1500
 const canFly = typeof Element === 'function' && typeof Element.prototype.animate === 'function'
 const TRAVEL_BACK_PX = travelMod?.TRAVEL_BACK_PX || 32
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
@@ -1157,7 +1159,7 @@ function renderCapsuleRandom(body) {
 
 
 /* ---------- 时空穿梭 ---------- */
-const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0, layout: null, quality: 'full', frameBudget: [] }
+const travel = { open: false, phase: '', event: null, source: 'random', raf: 0, start: 0, duration: TRAVEL_MS, fromMs: 0, toMs: 0, play: null, skips: 0, layout: null, quality: 'full', frameBudget: [], deadline: 0 }
 function dismissCapsuleForTravel() {
   const d = $('capsuleDialog')
   if (!d?.open) return
@@ -1344,6 +1346,23 @@ function animateTravelOverlays(flight, layout) {
   }
   for (const anim of anims) anim.startTime = flight.start
 }
+// Hard stop for a travel phase. Whatever drives the motion (compositor flight
+// timer, rAF fallback), if it dies or stalls the phase still ends on time and
+// the arrival page / home page always shows.
+function armTravelDeadline(phase, ms, done) {
+  clearTimeout(travel.deadline)
+  travel.deadline = setTimeout(() => {
+    travel.deadline = 0
+    if (!travel.open || travel.phase !== phase) return
+    // Test hook: a held flight is frozen on purpose.
+    if (Number.isFinite(Number(document.documentElement.dataset.travelHold))) { armTravelDeadline(phase, 500, done); return }
+    try { done() } catch (err) { console.error(err) }
+  }, ms)
+}
+function clearTravelDeadline() {
+  clearTimeout(travel.deadline)
+  travel.deadline = 0
+}
 // Runs a whole flight with no rAF loop. Returns false when the browser cannot
 // (no Web Animations), so the caller keeps the per-frame fallback.
 function flyTunnel({ reverse, duration, from, to, phase, onDone }) {
@@ -1355,12 +1374,15 @@ function flyTunnel({ reverse, duration, from, to, phase, onDone }) {
   const step = () => {
     if (travel.flight !== flight || travel.phase !== phase) return
     const hold = Number(document.documentElement.dataset.travelHold)
-    holdTunnelFlight(hold)
     const held = Number.isFinite(hold)
     const raw = held ? Math.min(1, Math.max(0, hold)) : Math.min(1, (performance.now() - start) / duration)
-    const t = easeTravel(raw)
-    poseTravelCards(t, reverse)
-    paintTravelClock(lerp(from, to, t), held)
+    // A failing paint step must never stop the clock that ends the flight.
+    try {
+      holdTunnelFlight(hold)
+      const t = easeTravel(raw)
+      poseTravelCards(t, reverse)
+      paintTravelClock(lerp(from, to, t), held)
+    } catch (err) { console.error(err) }
     if (!held && raw >= 1) { onDone(); return }
     flight.timer = setTimeout(step, held ? 120 : Math.max(0, Math.min(FLIGHT_TICK_MS, duration * (1 - raw))))
   }
@@ -1570,7 +1592,7 @@ async function collectTunnelArts(target) {
     ready = readyTravelArts(picked)
   }
   if (!ready.length && target?.cover) {
-    const one = await decodeTravelCover(target.cover, px)
+    const one = await Promise.race([decodeTravelCover(target.cover, px).catch(() => null), waitMs(1200).then(() => null)])
     if (one) ready = [{ event: target, img: one }]
   }
   const others = ready.filter(a => a.event?.song_id !== target?.song_id)
@@ -1875,23 +1897,40 @@ function syncTravelEventFromPlayer() {
   return current
 }
 function finishGoing() {
-  const event = syncTravelEventFromPlayer() || travel.event
+  clearTravelDeadline()
+  let event = travel.event
+  try { event = syncTravelEventFromPlayer() || travel.event } catch (err) { console.error(err) }
   stopTunnelFlight()
   travel.phase = 'arrive'
-  paintTravelClock(travel.toMs, true)
-  poseTravelCards(1, false)
+  // Final tunnel pose is cosmetic; the arrival page must show even if it fails.
+  try {
+    paintTravelClock(travel.toMs, true)
+    poseTravelCards(1, false)
+  } catch (err) { console.error(err) }
   const hero = $('travelHero')
   const canMorph = motion && !reduced.matches && typeof document.startViewTransition === 'function'
     && hero && !hero.hidden && event?.cover && hero.querySelector('img')
   if (canMorph) {
     hero.style.viewTransitionName = 'travel-hero'
-    const vt = document.startViewTransition(() => {
+    let shown = false
+    const reveal = () => {
+      if (shown) return
+      shown = true
       hero.style.viewTransitionName = ''
       showArrival(travel.event || event)
       const art = $('arriveArt')
       if (art) art.style.viewTransitionName = 'travel-hero'
-    })
-    vt.finished.finally(() => { const art = $('arriveArt'); if (art) art.style.viewTransitionName = '' })
+    }
+    const unname = () => { const art = $('arriveArt'); if (art) art.style.viewTransitionName = '' }
+    try {
+      const vt = document.startViewTransition(reveal)
+      vt.finished.catch(() => {}).finally(unname)
+      // The morph is decoration: if the browser skips or stalls it, the
+      // arrival page shows anyway.
+      setTimeout(() => { if (!shown && travel.phase === 'arrive') { reveal(); unname() } }, 1200)
+    } catch {
+      reveal(); unname()
+    }
     return
   }
   showArrival(travel.event || event)
@@ -1904,6 +1943,8 @@ function skipTravel() {
 function beginTravelMotion(event, arts) {
   if (travel.event !== event || (travel.phase !== 'going' && travel.phase !== 'waiting')) return
   travel.phase = 'going'
+  // Armed before any setup so a failing step can never strand the tunnel.
+  armTravelDeadline('going', travel.duration + TRAVEL_DEADLINE_SLACK_MS, finishGoing)
   travel.clockAt = 0
   syncTravelStageLayout()
   buildTravelTunnel(event, arts)
@@ -1915,6 +1956,7 @@ function beginTravelMotion(event, arts) {
   cancelAnimationFrame(travel.raf)
   travel.start = performance.now()
   travel._lastTick = 0
+  armTravelDeadline('going', travel.duration + TRAVEL_DEADLINE_SLACK_MS, finishGoing)
   if (flyTunnel({ reverse: false, duration: travel.duration, from: travel.fromMs, to: travel.toMs, phase: 'going', onDone: () => finishGoing() })) return
   const tick = now => {
     const hold = Number(document.documentElement.dataset.travelHold)
@@ -1982,6 +2024,11 @@ function startTravel(event, { source = 'random' } = {}) {
     if (!travel.open || (travel.phase !== 'waiting' && travel.phase !== 'going')) return
     // The player may already have skipped to another playable track.
     beginTravelMotion(travel.event || event, arts)
+  }).catch(err => {
+    console.error(err)
+    // No covers: fly with whatever the tunnel can build rather than hang.
+    if (travel.open && travel.phase === 'waiting') beginTravelMotion(travel.event || event, [])
+    // (once 'going', the travel deadline ends the trip)
   })
 }
 function rerollTravel() {
@@ -2007,6 +2054,8 @@ function returnToPresent({ fromPop = false } = {}) {
   const canRewind = motion && !reduced.matches && travel.phase === 'arrive' && !fromPop
   if (canRewind) {
     travel.phase = 'back'
+    // Armed before any painting so the trip home always completes.
+    armTravelDeadline('back', TRAVEL_BACK_MS + TRAVEL_DEADLINE_SLACK_MS, () => finishTravel({ fromPop }))
     const overlay = $('travelOverlay')
     // Reuse the going tiles when they are still in the DOM; rebuild only
     // from already-decoded covers so the rewind never flashes empty faces.
@@ -2049,6 +2098,7 @@ function returnToPresent({ fromPop = false } = {}) {
   finishTravel({ fromPop })
 }
 function finishTravel({ fromPop = false } = {}) {
+  clearTravelDeadline()
   cancelAnimationFrame(travel.raf)
   stopTunnelFlight()
   const overlay = $('travelOverlay')
@@ -2071,7 +2121,11 @@ function finishTravel({ fromPop = false } = {}) {
   }
   // Let the home timeline paint under the still-open overlay for a frame
   // so closing it does not composite the long list with leftover 3D tiles.
-  requestAnimationFrame(revealHome)
+  // The timer covers a page whose rAF is not running.
+  let revealed = false
+  const revealOnce = () => { if (revealed) return; revealed = true; revealHome() }
+  requestAnimationFrame(revealOnce)
+  setTimeout(revealOnce, 160)
 }
 
 /* ---------- 弹窗 ---------- */
