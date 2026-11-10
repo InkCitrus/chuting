@@ -1815,7 +1815,11 @@ function showArrival(event) {
   overlay?.classList.add('is-arrive')
   overlay?.classList.remove('is-going')
   const leftover = $('travelHero')
-  if (leftover) { leftover._pose = null; leftover.style.opacity = '0'; leftover.hidden = true }
+  if (leftover) { leftover._pose = null; leftover.style.opacity = '0'; leftover.style.viewTransitionName = ''; leftover.hidden = true }
+  // Hide the tunnel completely once we have arrived. Isolation already stacks
+  // the arrival page above it, but a stalled view-transition or a compositor
+  // leftover can still let a tile or the dark stage show through the cover.
+  if ($('travelStage')) $('travelStage').hidden = true
   const box = $('travelArrive')
   if (box) box.hidden = false
   paintArriveBg(event)
@@ -1911,6 +1915,12 @@ function finishGoing() {
   const canMorph = motion && !reduced.matches && typeof document.startViewTransition === 'function'
     && hero && !hero.hidden && event?.cover && hero.querySelector('img')
   if (canMorph) {
+    // Snapshot a flat 2D card. The in-flight pose is a perspective()
+    // transform; capturing that often clips the cover or leaves a leftover
+    // view-transition layer over the arrival art.
+    hero.style.transform = 'none'
+    hero.style.opacity = '1'
+    hero.style.visibility = 'visible'
     hero.style.viewTransitionName = 'travel-hero'
     let shown = false
     const reveal = () => {
@@ -1924,10 +1934,17 @@ function finishGoing() {
     const unname = () => { const art = $('arriveArt'); if (art) art.style.viewTransitionName = '' }
     try {
       const vt = document.startViewTransition(reveal)
-      vt.finished.catch(() => {}).finally(unname)
-      // The morph is decoration: if the browser skips or stalls it, the
-      // arrival page shows anyway.
-      setTimeout(() => { if (!shown && travel.phase === 'arrive') { reveal(); unname() } }, 1200)
+      const settle = () => { clearTimeout(travel.morphTimer); travel.morphTimer = 0; try { vt.skipTransition?.() } catch {} unname() }
+      vt.finished.catch(() => {}).finally(() => { clearTimeout(travel.morphTimer); travel.morphTimer = 0; unname() })
+      // The morph is decoration. The 1.2s timer used to run only when reveal()
+      // had not been called; if the update callback ran but the transition
+      // itself stalled, the named snapshot stayed on top of the cover.
+      travel.morphTimer = setTimeout(() => {
+        travel.morphTimer = 0
+        if (travel.phase !== 'arrive') return
+        if (!shown) reveal()
+        settle()
+      }, 1200)
     } catch {
       reveal(); unname()
     }
@@ -2099,6 +2116,8 @@ function returnToPresent({ fromPop = false } = {}) {
 }
 function finishTravel({ fromPop = false } = {}) {
   clearTravelDeadline()
+  clearTimeout(travel.morphTimer)
+  travel.morphTimer = 0
   cancelAnimationFrame(travel.raf)
   stopTunnelFlight()
   const overlay = $('travelOverlay')
