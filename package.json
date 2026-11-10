@@ -23,6 +23,6 @@
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.7",
-    "wrangler": "^4.157.0"
+    "wrangler": "^4.158.0"
   }
 }
