@@ -53,6 +53,8 @@ const travelFx = travelMod?.travelFx || (() => ({ flash: 0, streaks: 0, chroma: 
 const formatTravelMeta = travelMod?.formatTravelMeta || ((ms, toMs) => 'T−0')
 const travelStageLayout = travelMod?.travelStageLayout || ((w, h) => ({ portrait: Number(h) > Number(w), wallX: 470, wallY: 278, faceCounts: [4, 4, 6, 6], perspective: 900, spacing: 310, zMin: -1640, tiles: 120, coverPx: 200 }))
 const travelQuality = travelMod?.travelQuality || (() => 'full')
+const cardTransform = travelMod?.cardTransform || ((pose) => `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px)`)
+const cardDepthIndex = travelMod?.cardDepthIndex || (() => 1)
 const TRAVEL_BACK_PX = travelMod?.TRAVEL_BACK_PX || 32
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
@@ -1192,15 +1194,15 @@ function setStyle(el, key, value) {
   cache[key] = value
   el.style[key] = value
 }
-function applyCardPose(el, pose) {
+function applyCardPose(el, pose, { depth = false } = {}) {
   if (!el) return
   const visible = pose.opacity > 0.01
   setStyle(el, 'visibility', visible ? 'visible' : 'hidden')
   if (!visible) return
   setStyle(el, 'opacity', pose.opacity.toFixed(3))
-  const rx = pose.rotateX || 0
-  const ry = pose.rotateY || 0
-  setStyle(el, 'transform', `translate3d(${pose.x.toFixed(1)}px, ${pose.y.toFixed(1)}px, ${pose.z.toFixed(1)}px) rotateX(${rx}deg) rotateY(${ry}deg) scale(${(pose.scale || 1).toFixed(4)})`)
+  const layout = travel.layout || syncTravelStageLayout()
+  setStyle(el, 'transform', cardTransform(pose, layout.cam))
+  if (depth) setStyle(el, 'zIndex', String(cardDepthIndex(pose.z, layout)))
   const shade = el._shade || (el._shade = el.querySelector('.travel-card-shade'))
   if (shade) {
     const dark = pose.brightness == null ? 0 : Math.max(0, Math.min(1, 1 - pose.brightness))
@@ -1231,6 +1233,15 @@ function syncTravelStageLayout() {
     stage.classList.toggle('is-portrait', !!layout.portrait)
     stage.classList.toggle('is-lite', layout.quality === 'lite')
   }
+  // The vanishing point stays defined in CSS (perspective-origin); cards project
+  // themselves around it, so no 3D rendering context is needed on the stage.
+  let ox = 0, oy = 0
+  if (stage && stage.clientWidth) {
+    const [px, py] = String(getComputedStyle(stage).perspectiveOrigin || '').split(' ').map(parseFloat)
+    if (Number.isFinite(px)) ox = px - stage.clientWidth / 2
+    if (Number.isFinite(py)) oy = py - stage.clientHeight / 2
+  }
+  layout.cam = { perspective: layout.perspective, ox, oy }
   return layout
 }
 function travelCoverPx() {
@@ -1256,7 +1267,7 @@ function poseTravelCards(t, reverse = false) {
   let pass = '', passZ = -Infinity
   for (let i = 0; i < n; i++) {
     const pose = cardPose(i, n, t, reverse, layout)
-    applyCardPose(cards[i], pose)
+    applyCardPose(cards[i], pose, { depth: true })
     if (pose.opacity > 0.55 && pose.z > passZ && cards[i].dataset.name) {
       passZ = pose.z
       pass = [cards[i].dataset.name, cards[i].dataset.artists].filter(Boolean).join(' · ')
@@ -1635,9 +1646,16 @@ function paintArriveNote(result) {
   note.classList.toggle('is-wait-play', blocked)
   $('arriveArt')?.classList.toggle('is-wait-play', blocked)
 }
+// A play result only speaks for the song it was about. Auto-skip, the end of a
+// song or a newer tap supersede travel.play, so follow the player's newest job
+// and drop results (including stale ones without song_id) for any other song.
+function resultFor(event, result) {
+  return Boolean(result && event && result.song_id != null && String(result.song_id) === String(event.song_id))
+}
 function watchArriveNote(event) {
-  if (travel.play && typeof travel.play.then === 'function') {
-    travel.play.then(result => { if (travel.event === event) paintArriveNote(result) })
+  const job = (player?.current?.song_id === event?.song_id && player?.job) || travel.play
+  if (job && typeof job.then === 'function') {
+    job.then(result => { if (travel.event === event && resultFor(event, result)) paintArriveNote(result) })
   } else if (player?.note) paintArriveNote({ ok: false, error: player.note })
   else paintArriveNote({ ok: Boolean(player?.playing && player?.current?.song_id === event.song_id) })
 }
@@ -1823,7 +1841,7 @@ function startTravel(event, { source = 'random' } = {}) {
   if (!same) {
     player?.duck?.(240)
     travel.play = player?.play?.(event, { fadeIn: 1600 })
-    if (travel.play?.then) travel.play.then(result => { if (travel.event === event && travel.phase === 'arrive') paintArriveNote(result) })
+    if (travel.play?.then) travel.play.then(result => { if (travel.event === event && travel.phase === 'arrive' && resultFor(event, result)) paintArriveNote(result) })
   } else {
     travel.play = Promise.resolve({ ok: true })
   }
@@ -2423,8 +2441,11 @@ function resumeBlockedTravelPlay() {
   if (travel.phase !== 'arrive' || !travel.event) return
   const art = $('arriveArt')
   if (!art?.classList.contains('is-wait-play') && !$('arriveNote')?.classList.contains('is-wait-play')) return
-  travel.play = player?.play?.(travel.event)
-  if (travel.play?.then) travel.play.then(result => { if (travel.event) paintArriveNote(result) })
+  // resume() calls play() synchronously in this tap when the URL is already on
+  // the element, which is what iOS needs; a fresh load would wait on the network.
+  const event = travel.event
+  travel.play = player?.resume ? player.resume(event) : player?.play?.(event)
+  if (travel.play?.then) travel.play.then(result => { if (travel.event === event && resultFor(event, result)) paintArriveNote(result) })
 }
 $('arriveArt')?.addEventListener('click', resumeBlockedTravelPlay)
 $('arriveNote')?.addEventListener('click', resumeBlockedTravelPlay)

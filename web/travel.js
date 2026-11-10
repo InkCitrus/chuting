@@ -229,6 +229,30 @@ export function cardPose(i, n, t, reverse = false, layout = null) {
   return { x, y, z, opacity, rotate: 0, rotateX, rotateY, scale: 1, blur: 0, brightness, face, ring, side: face < 2 ? (face === 0 ? -1 : 1) : 0 }
 }
 
+// Per-card projection. Each card carries its own perspective() instead of
+// relying on a parent `perspective` + `transform-style: preserve-3d` 3D
+// rendering context, which iOS WebKit (Safari and Chrome on iPhone) can
+// flatten into a static 2D frame. translate(o) perspective(P) translate(-o)
+// is the same projection a parent with perspective-origin o would apply,
+// where o is the origin's offset from the card's own centre.
+export function cardTransform(pose, cam = {}) {
+  const p = Math.max(1, Number(cam.perspective) || 900)
+  const ox = Number(cam.ox) || 0
+  const oy = Number(cam.oy) || 0
+  const f = n => (Number(n) || 0).toFixed(1)
+  const lead = ox || oy ? `translate3d(${f(ox)}px, ${f(oy)}px, 0px) ` : ''
+  return `${lead}perspective(${p}px) translate3d(${f(pose.x - ox)}px, ${f(pose.y - oy)}px, ${f(pose.z)}px) ` +
+    `rotateX(${Number(pose.rotateX) || 0}deg) rotateY(${Number(pose.rotateY) || 0}deg) scale(${(Number(pose.scale) || 1).toFixed(4)})`
+}
+
+// Paint order without a 3D context: farther cards stack lower. Quantised to
+// half a ring so z-index only changes a few times per ring pass.
+export function cardDepthIndex(z, layout = null) {
+  const zMin = layout?.zMin ?? -1640
+  const step = Math.max(1, (layout?.spacing ?? 310) / 2)
+  return 1 + Math.max(0, Math.floor(((Number(z) || 0) - zMin) / step))
+}
+
 // The destination cover grows out of the vanishing point after the speed peak.
 export function heroPose(t, reverse = false) {
   const p = reverse ? 1 - t : t
