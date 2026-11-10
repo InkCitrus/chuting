@@ -32,3 +32,27 @@ test('every travel phase has a deadline that does not depend on animations or rA
     assert.doesNotMatch(body(name), /\.finished\.then\(|onfinish|await /, `${name} must not wait on an animation promise to end a trip`)
   }
 })
+
+test('the tunnel stage is not painted after arrival', () => {
+  // The arrival page stacks above the stage, but a stalled view-transition or a
+  // leftover compositor layer can still let the dark tunnel show through the
+  // cover. Arrival must hide the stage outright; the rewind un-hides it.
+  assert.match(rule('.travel.is-arrive .travel-stage'), /visibility:\s*hidden/)
+  const body = name => app.slice(app.indexOf(`function ${name}(`), app.indexOf('\nfunction ', app.indexOf(`function ${name}(`) + 1))
+  assert.match(body('showArrival'), /travelStage'\)\.hidden = true/)
+  assert.match(body('returnToPresent'), /travelStage'\)\.hidden = false/)
+})
+
+test('arrival cover art always fills its square, and a stalled morph is skipped', () => {
+  // %-height on an <img> inside an aspect-ratio box is unreliable (especially
+  // in WebKit): the image can sit at the top of the card and leave the rest
+  // of the card (and the page behind it) black.
+  const img = rule('.arrive-art-img, .arrive-art img')
+  assert.match(img, /position:\s*absolute/)
+  assert.match(img, /inset:\s*0/)
+  const finish = app.slice(app.indexOf('function finishGoing('), app.indexOf('\nfunction ', app.indexOf('function finishGoing(') + 1))
+  assert.match(finish, /skipTransition/)
+  assert.match(finish, /style\.transform = 'none'/)
+  // The 1.2s fallback must run even after reveal() has already been called.
+  assert.doesNotMatch(finish, /if \(!shown && travel\.phase === 'arrive'\) \{ reveal\(\); unname\(\) \}/)
+})
