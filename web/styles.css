@@ -276,7 +276,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 
 .hero-tagline { font-family: var(--serif); font-size: clamp(17px, 1.6vw, 21px); line-height: 1.6; color: var(--ink-2); margin: 26px 0 0; max-width: 30em; letter-spacing: .02em }
 .hero-tagline::before { content: ""; display: inline-block; vertical-align: middle; width: 28px; height: 1px; margin: -.2em 12px 0 0; background: var(--accent) }
-.hero-story { font-family: var(--serif); font-size: clamp(22px, 2.4vw, 31px); line-height: 1.72; max-width: 22em; margin: 40px 0 0; color: var(--ink); text-wrap: pretty; word-break: keep-all; min-height: 3.4em }
+.hero-story { font-family: var(--serif); font-size: clamp(22px, 2.4vw, 31px); line-height: 1.72; max-width: 22em; margin: 40px 0 0; color: var(--ink); text-wrap: pretty; word-break: keep-all; overflow-wrap: anywhere; min-height: 3.4em }
 .hero-story .num { font-family: var(--display); font-weight: 700; font-size: 1.5em; line-height: 1; color: var(--accent); font-variant-numeric: lining-nums tabular-nums; padding: 0 .08em; letter-spacing: -.01em }
 .hero-story .mark, .chapter-story .mark { white-space: nowrap; font-weight: 700; background: linear-gradient(transparent 64%, var(--accent-soft) 64%, var(--accent-soft) 92%, transparent 92%); padding: 0 .08em }
 .hero-story .mark.wrap { white-space: normal }
@@ -369,11 +369,13 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 }
 .hl-controls .icon-button:active:not(:disabled) { transform: scale(.94) }
 .hl-dots { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 0 }
-.hl-dot { position: relative; height: 24px; width: 16px; border: 0; padding: 0; background: transparent; flex: 0 1 auto; transition: width .45s var(--ease) }
-.hl-dot::before, .hl-dot i { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 2px; border-radius: 2px; background: var(--line) }
+/* Segments share the row (the active one is wider), so they never collapse to a 1px sliver. */
+.hl-dot { position: relative; height: 28px; min-width: 6px; border: 0; padding: 0; background: transparent; flex: 1 1 0; transition: flex-grow .45s var(--ease) }
+.hl-dot::before, .hl-dot i { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; border-radius: 2px; background: var(--line) }
 .hl-dot i { background: var(--ink); transform: scaleX(0); transform-origin: 0 50% }
 .hl-dot:hover::before { background: var(--faint) }
-.hl-dot.is-active { width: 36px }
+.hl-dot.is-active { flex-grow: 2.6 }
+@media (pointer: coarse) { .hl-dot { height: 36px } .hl-dot::before, .hl-dot i { top: 17px; height: 3px } }
 .hl-dot.is-active i { transform: scaleX(1) }
 .highlights.is-ticking .hl-dot.is-active i { animation: progress 6.5s linear both }
 .highlights.is-held .hl-dot.is-active i { animation-play-state: paused }
@@ -797,7 +799,8 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-meta { font-size: 13px }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-line { display: none }
   .hero.has-highlights:has(#heroCapsule:not([hidden])) .hl-controls {
-    width: 200px;
+    width: 100%;
+    max-width: 320px;
     margin-top: 10px;
   }
   .hero-stats:not([hidden]) {
@@ -1285,7 +1288,8 @@ body.has-mini .to-top { bottom: calc(86px + env(safe-area-inset-bottom)) }
 }
 
 /* 胶囊面板：顶上一溜封面，像从胶片里抽出来 */
-.capsule-ribbon { display: flex; gap: 6px; height: 54px; margin: -4px -8px 16px; overflow: hidden; pointer-events: none;
+/* Ends short of the close button (top right) so no cover sits under it. */
+.capsule-ribbon { display: flex; gap: 6px; height: 54px; margin: -4px 40px 16px -8px; overflow: hidden; pointer-events: none;
   mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent) }
 .capsule-film { width: 54px; height: 54px; border-radius: 6px; flex-shrink: 0; opacity: .86 }
 
@@ -1348,7 +1352,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
   box-shadow: 0 28px 58px rgb(0 0 0 / .58), 0 0 0 1px rgb(255 255 255 / .1) }
 .travel-card.is-glyph { background: #1a1816; overflow: hidden }
 .travel-clock { position: absolute; left: 50%; top: 46%; translate: -50% -50%; text-align: center; z-index: 6; pointer-events: none;
-  isolation: isolate }
+  isolation: isolate; width: max-content; max-width: 92vw }
 .travel-clock::before { content: ""; position: absolute; left: 50%; top: 42%; width: min(560px, 56vw); height: 240px;
   translate: -50% -50%; z-index: -1; pointer-events: none;
   background: radial-gradient(closest-side, rgb(12 11 10 / .72), rgb(12 11 10 / .32) 52%, transparent 78%) }
@@ -1368,8 +1372,14 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 .travel-progress { display: block; position: relative; width: min(260px, 38vw); height: 1.5px; margin: 16px auto 0;
   background: rgb(243 238 230 / .2) }
 .travel-progress > i { display: block; height: 100%; width: 100%; background: rgb(243 238 230 / .7); transform-origin: left center; transform: scaleX(0); will-change: transform }
-.travel-pass { display: block; margin-top: 12px; font-family: var(--mono); font-size: 12px; letter-spacing: .16em;
-  color: rgb(243 238 230 / .62); min-height: 1.2em; white-space: nowrap }
+/* The passing name sits on its own dark pill: the scrim behind the clock fades
+   out toward the edges, so over a bright cover the start of a long name was
+   unreadable. Inline-block with a cap keeps long names left-aligned with an ellipsis. */
+.travel-pass { display: inline-block; vertical-align: top; box-sizing: border-box; max-width: min(78vw, 560px); margin-top: 12px; padding: 3px 12px;
+  border-radius: 999px; background: rgb(12 11 10 / .62); text-shadow: 0 1px 6px rgb(12 11 10 / .8);
+  font-family: var(--mono); font-size: 12px; letter-spacing: .16em;
+  color: rgb(243 238 230 / .78); min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left }
+.travel-pass:empty { visibility: hidden }
 .travel-meta { display: block; margin-top: 5px; font-family: var(--mono); font-size: 11px; letter-spacing: .26em;
   color: rgb(243 238 230 / .58) }
 .travel-skip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 8; margin: 0; padding: 18px 24px calc(16px + env(safe-area-inset-bottom));
@@ -1520,8 +1530,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
     text-shadow: 0 2px 28px rgb(12 11 10 / .6) }
   .travel-md { font-size: clamp(26px, 7vw, 34px); letter-spacing: .16em; color: #f3eee6; font-weight: 500 }
   .travel-md i { opacity: .5 }
-  .travel-pass { font-size: 13px; letter-spacing: .1em; color: rgb(243 238 230 / .88);
-    max-width: 78vw; overflow: hidden; text-overflow: ellipsis }
+  .travel-pass { font-size: 13px; letter-spacing: .1em; color: rgb(243 238 230 / .88); max-width: 78vw }
   .travel-meta { font-size: 12px; letter-spacing: .18em; color: rgb(243 238 230 / .76) }
   .travel-progress { width: min(220px, 56vw); height: 2px; margin-top: 18px; background: rgb(243 238 230 / .3) }
   .travel-progress > i { background: rgb(243 238 230 / .88) }

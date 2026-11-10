@@ -561,6 +561,8 @@ function setSlide(i, options = {}) {
   if (!options.instant && motion) setTimeout(() => slides[prev]?.classList.remove('is-leaving'), 900)
   for (const [k, dot] of [...$('hlDots').children].entries()) {
     dot.classList.toggle('is-active', k === i)
+    // One tab stop for the whole row; ←/→ on the carousel moves between slides.
+    dot.tabIndex = k === i ? 0 : -1
     if (k === i) dot.setAttribute('aria-current', 'true'); else dot.removeAttribute('aria-current')
   }
   if (options.announce) $('hlLive').textContent = `${hl.items[i].kicker}：${hl.items[i].title}`
@@ -623,8 +625,12 @@ function setupHighlights() {
   box.addEventListener('focusin', () => hold('focus', true))
   box.addEventListener('focusout', e => { if (!box.contains(e.relatedTarget)) hold('focus', false) })
   box.addEventListener('keydown', e => {
-    if (e.key === 'ArrowLeft') { e.preventDefault(); setSlide(hl.index - 1, { dir: -1, announce: true }) }
-    if (e.key === 'ArrowRight') { e.preventDefault(); setSlide(hl.index + 1, { dir: 1, announce: true }) }
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const dir = e.key === 'ArrowLeft' ? -1 : 1
+    const onDot = e.target.closest?.('.hl-dot')
+    setSlide(hl.index + dir, { dir, announce: true })
+    if (onDot) $('hlDots').children[hl.index]?.focus()
   })
   // Drag follows the pointer (with resistance); on release the distance or the flick speed decides.
   let swipe = null, swiped = false
@@ -1051,10 +1057,10 @@ function renderHeroCapsule() {
     }
     capsule.todayPick = first
   } else if (result.nearest?.songs?.length) {
-    setCapsuleLine(['往年的今天还是空白。最靠近的是 ', { className: 'hero-capsule-date', text: `${result.nearest.m}月${result.nearest.d}日` }])
+    setCapsuleLine(['往年的今天还是空白。最靠近的是 ', { className: 'hero-capsule-date', text: `${result.nearest.m} 月 ${result.nearest.d} 日` }])
     if (todayBtn) {
       todayBtn.hidden = false
-      setLinkLabel(todayBtn, '去那年的今天')
+      setLinkLabel(todayBtn, `去 ${result.nearest.m} 月 ${result.nearest.d} 日`)
       todayBtn.title = '去往年里最靠近今天的那一天'
     }
     capsule.todayPick = result.nearest.songs[0].event
