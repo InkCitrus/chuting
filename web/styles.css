@@ -1334,13 +1334,17 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
   background-size: 160px 160px }
 .travel-tunnel { position: absolute; inset: 0; z-index: 1; isolation: isolate; pointer-events: none }
 .travel-card { position: absolute; left: 50%; top: 50%; width: 148px; height: 148px; margin: -74px 0 0 -74px;
-  overflow: hidden; border-radius: 8px; background: #141210; will-change: transform, opacity;
+  border-radius: 8px; background: #141210; will-change: transform, opacity;
   box-shadow: 0 8px 16px rgb(0 0 0 / .32), 0 0 0 1px rgb(255 255 255 / .06); backface-visibility: hidden; -webkit-backface-visibility: hidden }
-.travel-card-art { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit }
-.travel-card-shade { position: absolute; inset: 0; background: #0c0b0a; opacity: 0; pointer-events: none; will-change: opacity }
+.travel-card-art { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 8px }
+.travel-card-shade { position: absolute; inset: 0; border-radius: 8px; background: #0c0b0a; opacity: 0; pointer-events: none; will-change: opacity }
+/* Rounded corners are set on the art and the shade themselves, not clipped by the
+   card. A rounded overflow clip over the composited shade costs a mask layer per
+   card, and border-radius: inherit re-styled every cover image whenever its
+   animated card was re-styled (≈50× the style cost in Chromium). */
 .travel-hero-card { width: 220px; height: 220px; margin: -110px 0 0 -110px; z-index: 8;
   box-shadow: 0 28px 58px rgb(0 0 0 / .58), 0 0 0 1px rgb(255 255 255 / .1) }
-.travel-card.is-glyph { background: #1a1816 }
+.travel-card.is-glyph { background: #1a1816; overflow: hidden }
 .travel-clock { position: absolute; left: 50%; top: 46%; translate: -50% -50%; text-align: center; z-index: 6; pointer-events: none;
   isolation: isolate }
 .travel-clock::before { content: ""; position: absolute; left: 50%; top: 42%; width: min(560px, 56vw); height: 240px;

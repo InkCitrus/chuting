@@ -55,6 +55,15 @@ const travelStageLayout = travelMod?.travelStageLayout || ((w, h) => ({ portrait
 const travelQuality = travelMod?.travelQuality || (() => 'full')
 const cardTransform = travelMod?.cardTransform || ((pose) => `translate3d(${pose.x}px, ${pose.y}px, ${pose.z}px)`)
 const cardDepthIndex = travelMod?.cardDepthIndex || (() => 1)
+const cardKeyframes = travelMod?.cardKeyframes || null
+const ringDepthIndex = travelMod?.ringDepthIndex || null
+const tileLayout = travelMod?.tileLayout || null
+const sampleTrack = travelMod?.sampleTrack || null
+// Main-thread cadence during a compositor flight: clock digits, the name line
+// and z-index at ring wraps. Any per-frame rAF makes Blink/WebKit restyle every
+// animated card each frame, so the flight deliberately has none.
+const FLIGHT_TICK_MS = 66
+const canFly = typeof Element === 'function' && typeof Element.prototype.animate === 'function'
 const TRAVEL_BACK_PX = travelMod?.TRAVEL_BACK_PX || 32
 const TRAVEL_COVER_PX = travelMod?.TRAVEL_COVER_PX || 200
 const TRAVEL_TILES = travelMod?.TRAVEL_TILES || travelMod?.TRAVEL_WALL || 72
@@ -1260,12 +1269,132 @@ function paintTravelBack(event) {
   if (img.getAttribute('src') !== url) img.src = url
   img.hidden = false
 }
+// The flight runs on the compositor: one Web Animation per card (transform +
+// opacity) and one per shade, built once from cardKeyframes. JS per frame only
+// touches the clock, the hero, a few overlays, and a ring's z-index when it wraps.
+function stopTunnelFlight() {
+  const flight = travel.flight
+  travel.flight = null
+  if (!flight) return
+  clearTimeout(flight.timer)
+  for (const anim of flight.anims) { try { anim.cancel() } catch {} }
+}
+function startTunnelFlight(reverse, duration, start) {
+  stopTunnelFlight()
+  const cards = [...($('travelTunnel')?.children || [])]
+  if (!canFly || !cardKeyframes || !ringDepthIndex || !cards.length) return null
+  const layout = travel.layout || syncTravelStageLayout()
+  const n = cards.length
+  const timing = { duration, fill: 'both', easing: 'linear' }
+  const anims = []
+  try {
+    cards.forEach((el, i) => {
+      const kf = cardKeyframes(i, n, layout, layout.cam, { reverse })
+      el._ring = kf.ring
+      setStyle(el, 'visibility', 'visible')
+      anims.push(el.animate(kf.card, timing))
+      const shade = el._shade || (el._shade = el.querySelector('.travel-card-shade'))
+      if (shade) anims.push(shade.animate(kf.shade, timing))
+    })
+  } catch {
+    for (const anim of anims) { try { anim.cancel() } catch {} }
+    return null
+  }
+  for (const anim of anims) anim.startTime = start
+  const rings = tileLayout ? tileLayout(0, n, layout.faceCounts).rings : 0
+  const perRing = tileLayout ? tileLayout(0, n, layout.faceCounts).perRing : n
+  travel.flight = { anims, reverse, duration, start, cards, n, rings, perRing, held: null }
+  return travel.flight
+}
+// Test hook (data-travel-hold) for the compositor path: freeze every card at
+// the same raw time, or put them back on the shared start time.
+function holdTunnelFlight(hold) {
+  const flight = travel.flight
+  if (!flight) return
+  if (Number.isFinite(hold)) {
+    if (flight.held === hold) return
+    for (const anim of flight.anims) { anim.pause(); anim.currentTime = hold * flight.duration }
+    flight.held = hold
+  } else if (flight.held != null) {
+    for (const anim of flight.anims) { anim.play(); anim.startTime = flight.start }
+    flight.held = null
+  }
+}
+function clockFade(t, reverse) {
+  return reverse ? Math.min(1, t * 1.4) : (t < 0.72 ? 1 : Math.max(0, 1 - (t - 0.72) / 0.2))
+}
+// Hero, flash / streaks / chroma / bloom, progress bar and clock fade: the same
+// formulas poseTravelCards uses per frame, sampled once into compositor tracks.
+function animateTravelOverlays(flight, layout) {
+  if (!sampleTrack) return
+  const { reverse, duration, anims } = flight
+  const timing = { duration, fill: 'both', easing: 'linear' }
+  const add = (el, fn) => { if (el) anims.push(el.animate(sampleTrack(u => fn(easeTravel(u))), timing)) }
+  const hero = $('travelHero')
+  if (hero && !hero.hidden) {
+    setStyle(hero, 'visibility', 'visible')
+    add(hero, t => { const pose = heroPose(t, reverse); return { transform: cardTransform(pose, layout.cam), opacity: Number(pose.opacity.toFixed(3)) } })
+    const shade = hero._shade || (hero._shade = hero.querySelector('.travel-card-shade'))
+    add(shade, t => { const b = heroPose(t, reverse).brightness; return { opacity: Number((b == null ? 0 : Math.max(0, Math.min(1, 1 - b))).toFixed(3)) } })
+  }
+  add($('travelClock'), t => ({ opacity: Number(clockFade(t, reverse).toFixed(3)) }))
+  add($('travelBar'), t => ({ transform: `scaleX(${Math.max(0, Math.min(1, reverse ? 1 - t : t)).toFixed(4)})` }))
+  for (const [id, key] of [['travelFlash', 'flash'], ['travelStreaks', 'streaks'], ['travelChroma', 'chroma'], ['travelBloom', 'bloom']]) {
+    add($(id), t => ({ opacity: Number((reverse ? { flash: 0, streaks: 0, chroma: 0, bloom: 0.35 } : travelFx(t))[key].toFixed(3)) }))
+  }
+  for (const anim of anims) anim.startTime = flight.start
+}
+// Runs a whole flight with no rAF loop. Returns false when the browser cannot
+// (no Web Animations), so the caller keeps the per-frame fallback.
+function flyTunnel({ reverse, duration, from, to, phase, onDone }) {
+  const start = performance.now()
+  const flight = startTunnelFlight(reverse, duration, start)
+  if (!flight) return false
+  const layout = travel.layout || syncTravelStageLayout()
+  try { animateTravelOverlays(flight, layout) } catch {}
+  const step = () => {
+    if (travel.flight !== flight || travel.phase !== phase) return
+    const hold = Number(document.documentElement.dataset.travelHold)
+    holdTunnelFlight(hold)
+    const held = Number.isFinite(hold)
+    const raw = held ? Math.min(1, Math.max(0, hold)) : Math.min(1, (performance.now() - start) / duration)
+    const t = easeTravel(raw)
+    poseTravelCards(t, reverse)
+    paintTravelClock(lerp(from, to, t), held)
+    if (!held && raw >= 1) { onDone(); return }
+    flight.timer = setTimeout(step, held ? 120 : Math.max(0, Math.min(FLIGHT_TICK_MS, duration * (1 - raw))))
+  }
+  flight.timer = setTimeout(step, 0)
+  return true
+}
+function poseTravelFlight(t, reverse, layout) {
+  const flight = travel.flight
+  const p = reverse ? 1 - t : t
+  const depth = []
+  for (let r = 0; r < flight.rings; r++) depth.push(ringDepthIndex(r, p, layout, flight.rings))
+  // Cached: a card's z-index is written only when its ring wraps.
+  for (const el of flight.cards) if (depth[el._ring] != null) setStyle(el, 'zIndex', String(depth[el._ring]))
+  // Name line: the nearest clearly visible ring, first named card in it.
+  let pass = '', passZ = -Infinity
+  for (let r = 0; r < flight.rings; r++) {
+    const i0 = r * flight.perRing
+    if (i0 >= flight.n) break
+    const pose = cardPose(i0, flight.n, t, reverse, layout)
+    if (!(pose.opacity > 0.55 && pose.z > passZ)) continue
+    for (let i = i0; i < Math.min(flight.n, i0 + flight.perRing); i++) {
+      const el = flight.cards[i]
+      if (el?.dataset.name) { passZ = pose.z; pass = [el.dataset.name, el.dataset.artists].filter(Boolean).join(' · '); break }
+    }
+  }
+  return pass
+}
 function poseTravelCards(t, reverse = false) {
   const cards = $('travelTunnel')?.children || []
   const n = cards.length
   const layout = travel.layout || syncTravelStageLayout()
   let pass = '', passZ = -Infinity
-  for (let i = 0; i < n; i++) {
+  if (travel.flight) pass = poseTravelFlight(t, reverse, layout)
+  else for (let i = 0; i < n; i++) {
     const pose = cardPose(i, n, t, reverse, layout)
     applyCardPose(cards[i], pose, { depth: true })
     if (pose.opacity > 0.55 && pose.z > passZ && cards[i].dataset.name) {
@@ -1273,15 +1402,13 @@ function poseTravelCards(t, reverse = false) {
       pass = [cards[i].dataset.name, cards[i].dataset.artists].filter(Boolean).join(' · ')
     }
   }
+  const line = $('travelPass')
+  if (line && t > 0.05 && t < 0.82 && pass) setText(line, pass)
+  if (travel.flight) return
   const hero = $('travelHero')
   if (hero) applyCardPose(hero, heroPose(t, reverse))
   const clock = $('travelClock')
-  if (clock) {
-    const fade = t < 0.72 ? 1 : Math.max(0, 1 - (t - 0.72) / 0.2)
-    setStyle(clock, 'opacity', (reverse ? Math.min(1, t * 1.4) : fade).toFixed(3))
-  }
-  const line = $('travelPass')
-  if (line && t > 0.05 && t < 0.82 && pass) setText(line, pass)
+  if (clock) setStyle(clock, 'opacity', clockFade(t, reverse).toFixed(3))
   const bar = $('travelBar')
   if (bar) setStyle(bar, 'transform', `scaleX(${Math.max(0, Math.min(1, reverse ? 1 - t : t)).toFixed(3)})`)
   const fx = reverse ? { flash: 0, streaks: 0, chroma: 0, bloom: 0.35 } : travelFx(t)
@@ -1480,6 +1607,7 @@ function paintTravelHero(target) {
 function buildTravelTunnel(target, arts) {
   const tunnel = $('travelTunnel')
   if (!tunnel) return 0
+  stopTunnelFlight()
   tunnel.replaceChildren()
   const ready = arts && arts.length ? arts : readyTravelArts(tunnelCoverPick(target))
   const want = travelTileCount()
@@ -1748,6 +1876,7 @@ function syncTravelEventFromPlayer() {
 }
 function finishGoing() {
   const event = syncTravelEventFromPlayer() || travel.event
+  stopTunnelFlight()
   travel.phase = 'arrive'
   paintTravelClock(travel.toMs, true)
   poseTravelCards(1, false)
@@ -1786,6 +1915,7 @@ function beginTravelMotion(event, arts) {
   cancelAnimationFrame(travel.raf)
   travel.start = performance.now()
   travel._lastTick = 0
+  if (flyTunnel({ reverse: false, duration: travel.duration, from: travel.fromMs, to: travel.toMs, phase: 'going', onDone: () => finishGoing() })) return
   const tick = now => {
     const hold = Number(document.documentElement.dataset.travelHold)
     const raw = Number.isFinite(hold) ? Math.min(1, Math.max(0, hold)) : Math.min(1, (now - travel.start) / travel.duration)
@@ -1899,6 +2029,7 @@ function returnToPresent({ fromPop = false } = {}) {
       if (travel.phase !== 'back') return
       if ($('travelArrive')) $('travelArrive').hidden = true
       travel.start = performance.now()
+      if (flyTunnel({ reverse: true, duration: travel.duration, from, to, phase: 'back', onDone: () => finishTravel({ fromPop }) })) return
       const tick = now => {
         const raw = Math.min(1, (now - travel.start) / travel.duration)
         const t = easeTravel(raw)
@@ -1919,6 +2050,7 @@ function returnToPresent({ fromPop = false } = {}) {
 }
 function finishTravel({ fromPop = false } = {}) {
   cancelAnimationFrame(travel.raf)
+  stopTunnelFlight()
   const overlay = $('travelOverlay')
   travel.phase = ''
   travel.open = false
