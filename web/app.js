@@ -773,6 +773,27 @@ function scrollAnchor() {
   }
   return null
 }
+
+function paintTimelineMeta(search) {
+  const el = $('timelineMeta')
+  if (!el) return
+  const stat = (num, label) => {
+    const s = node('span', 'timeline-stat')
+    s.append(node('b', 'num', num), node('span', '', label))
+    return s
+  }
+  if (state.loading) { el.replaceChildren(); return }
+  if (search) {
+    const s = node('span', 'timeline-stat')
+    s.append('找到 ', node('b', 'num', n(state.view.length)), node('span', '', ' 首'))
+    el.replaceChildren(s)
+    return
+  }
+  if (!state.view.length) { el.replaceChildren(); return }
+  const sep = node('span', 'timeline-stat-sep', '/')
+  sep.setAttribute('aria-hidden', 'true')
+  el.replaceChildren(stat(n(state.chapters.length), ' 个月'), sep, stat(n(state.view.length), ' 首初听'))
+}
 function renderTimeline(options = {}) {
   const keep = options.keep && state.rendered > 0
   const anchor = keep ? scrollAnchor() : null
@@ -784,9 +805,9 @@ function renderTimeline(options = {}) {
   state.rendered = 0
   state.active = ''
   $('timelineTitle').textContent = search ? `搜索「${search}」` : '时间线'
-  $('timelineMeta').textContent = state.loading ? '' : search ? `找到 ${n(state.view.length)} 首` : state.view.length ? `${n(state.chapters.length)} 个月 · ${n(state.view.length)} 首初听` : ''
+  paintTimelineMeta(search)
   $('timelineTools').hidden = !state.loading && !search && !state.all.length
-  if ($('capsuleButton')) $('capsuleButton').hidden = !state.all.length
+  if ($('capsuleButton')) $('capsuleButton').hidden = !state.all.length || Boolean(search)
   const lede = $('timelineLede')
   lede.hidden = state.loading || Boolean(search) || !state.all.length
   if (!lede.hidden) rotate(lede, timelineLedes(state.all, state.order), { interval: 11000, delay: 5200 })

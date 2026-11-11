@@ -120,9 +120,17 @@
     <section class="timeline-section" id="timelineSection" aria-labelledby="timelineTitle" hidden>
       <div class="timeline-head">
         <div class="timeline-heading">
-          <h2 id="timelineTitle">时间线</h2>
+          <div class="timeline-mast">
+            <h2 id="timelineTitle">时间线</h2>
+            <button type="button" class="text-link serif timeline-capsule" id="capsuleButton" hidden>
+              <span class="text-link-label">历史上的今天</span>
+              <svg class="text-link-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8h9.6M9.2 4.2 13 8l-3.8 3.8"/></svg>
+            </button>
+          </div>
           <p id="timelineMeta" class="timeline-meta" aria-live="polite"></p>
-          <p id="timelineLede" class="timeline-lede"></p>
+          <div class="timeline-lede-wrap">
+            <p id="timelineLede" class="timeline-lede"></p>
+          </div>
         </div>
         <div class="timeline-tools" id="timelineTools">
           <label class="search">
@@ -130,15 +138,16 @@
             <input id="songSearch" type="search" placeholder="搜索歌名、歌手或专辑" aria-label="搜索歌名、歌手或专辑" autocomplete="off" enterkeyhint="search">
             <kbd class="search-key" aria-hidden="true">/</kbd>
           </label>
-          <div class="segmented" role="group" aria-label="排列顺序">
-            <button type="button" id="orderNewest" aria-pressed="true">最新在前</button>
-            <button type="button" id="orderOldest" aria-pressed="false">从头讲起</button>
+          <div class="timeline-toggles">
+            <div class="segmented" role="group" aria-label="排列顺序">
+              <button type="button" id="orderNewest" aria-pressed="true">最新在前</button>
+              <button type="button" id="orderOldest" aria-pressed="false">从头讲起</button>
+            </div>
+            <div class="segmented view-toggle" role="group" aria-label="显示方式">
+              <button type="button" id="viewList" aria-pressed="true">列表</button>
+              <button type="button" id="viewWall" aria-pressed="false">封面墙</button>
+            </div>
           </div>
-          <div class="segmented view-toggle" role="group" aria-label="显示方式">
-            <button type="button" id="viewList" aria-pressed="true">列表</button>
-            <button type="button" id="viewWall" aria-pressed="false">封面墙</button>
-          </div>
-          <button type="button" class="button ghost capsule-launch" id="capsuleButton" hidden>时光胶囊</button>
         </div>
       </div>
       <div class="timeline-body">
