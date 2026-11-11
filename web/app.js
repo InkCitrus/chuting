@@ -794,6 +794,20 @@ function paintTimelineMeta(search) {
   sep.setAttribute('aria-hidden', 'true')
   el.replaceChildren(stat(n(state.chapters.length), ' 个月'), sep, stat(n(state.view.length), ' 首初听'))
 }
+function syncTimelineSegs() {
+  for (const seg of document.querySelectorAll('.timeline-tools .segmented')) {
+    const on = seg.querySelector('[aria-pressed="true"]')
+    if (!on) continue
+    const range = document.createRange()
+    range.selectNodeContents(on)
+    const tr = range.getBoundingClientRect()
+    const sr = seg.getBoundingClientRect()
+    if (!tr.width) continue
+    seg.style.setProperty('--seg-x', `${(tr.left - sr.left).toFixed(2)}px`)
+    seg.style.setProperty('--seg-w', `${tr.width.toFixed(2)}px`)
+  }
+}
+
 function renderTimeline(options = {}) {
   const keep = options.keep && state.rendered > 0
   const anchor = keep ? scrollAnchor() : null
@@ -807,13 +821,14 @@ function renderTimeline(options = {}) {
   $('timelineTitle').textContent = search ? `搜索「${search}」` : '时间线'
   paintTimelineMeta(search)
   $('timelineTools').hidden = !state.loading && !search && !state.all.length
-  if ($('capsuleButton')) $('capsuleButton').hidden = !state.all.length || Boolean(search)
   const lede = $('timelineLede')
   lede.hidden = state.loading || Boolean(search) || !state.all.length
   if (!lede.hidden) rotate(lede, timelineLedes(state.all, state.order), { interval: 11000, delay: 5200 })
   for (const [id, order] of [['orderNewest', 'newest'], ['orderOldest', 'oldest']]) $(id).setAttribute('aria-pressed', String(state.order === order))
   for (const [id, layout] of [['viewList', 'list'], ['viewWall', 'wall']]) $(id).setAttribute('aria-pressed', String(state.layout === layout))
   $('viewWall').disabled = Boolean(search) // search results stay a list so the matches can be highlighted
+  syncTimelineSegs()
+  requestAnimationFrame(syncTimelineSegs)
   chapterObserver?.disconnect()
   const timeline = $('timeline')
   timeline.setAttribute('aria-busy', String(state.loading))
@@ -2870,7 +2885,6 @@ $('closeSettings').addEventListener('click', () => closeDialog($('settingsDialog
 $('closeSong').addEventListener('click', () => closeDialog($('songDialog')))
 $('closeLogin').addEventListener('click', () => closeDialog($('loginDialog')))
 $('closeCapsule')?.addEventListener('click', () => closeDialog($('capsuleDialog')))
-$('capsuleButton')?.addEventListener('click', () => openCapsule('today'))
 $('capsuleTodayBtn')?.addEventListener('click', () => { capsule.mode = 'today'; renderCapsule() })
 $('capsuleRandomBtn')?.addEventListener('click', () => { capsule.mode = 'random'; renderCapsule() })
 $('heroTravelToday')?.addEventListener('click', () => startTravel(capsule.todayPick, { source: 'today' }))
@@ -2906,6 +2920,8 @@ $('miniLocate')?.addEventListener('click', () => locateInTimeline(player?.curren
 $('prevSong').addEventListener('click', () => stepSong(-1))
 $('nextSong').addEventListener('click', () => stepSong(1))
 $('songDialog').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') stepSong(-1); if (e.key === 'ArrowRight') stepSong(1) })
+window.addEventListener('resize', syncTimelineSegs)
+document.fonts?.ready?.then(syncTimelineSegs)
 $('orderNewest').addEventListener('click', () => setOrder('newest'))
 $('orderOldest').addEventListener('click', () => setOrder('oldest'))
 $('viewList').addEventListener('click', () => setLayout('list'))
