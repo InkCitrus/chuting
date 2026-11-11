@@ -501,11 +501,11 @@ export function createPlayer({ els, mini, getUrl, coverFor, onEnded, onOpen, onC
     set('seekforward', d => { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + (d.seekOffset || 10)); position() })
   }
   return {
-    // The dialog shows a song; if something is playing and the user steps prev/next, the new song follows.
-    show(event, { follow = false } = {}) {
+    // The dialog can show a different song than the one already playing.
+    // Stepping prev/next only updates what is shown; the play button starts that song.
+    show(event) {
       state.shown = event
-      if (follow && state.event && !audio.paused && state.event.song_id !== event.song_id) load(event)
-      else render()
+      render()
     },
     get current() { return state.event },
     get playing() { return transportPlaying() },
