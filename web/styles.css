@@ -98,7 +98,7 @@
 }
 
 * { box-sizing: border-box }
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: calc(var(--bar) + 16px) }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: calc(var(--bar) + 36px) }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow-x: clip }
 button, input, select { font: inherit; color: inherit }
 button, a, input, select { -webkit-tap-highlight-color: transparent }
@@ -129,6 +129,8 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 
 /* ---------- 顶栏 ---------- */
 .bar { position: sticky; top: 0; z-index: 20; height: var(--bar); background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: saturate(1.4) blur(18px); -webkit-backdrop-filter: saturate(1.4) blur(18px); border-bottom: 0; box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--line) 70%, transparent) }
+:root[data-theme="dark"] .bar { background: color-mix(in srgb, var(--bg) 92%, transparent) }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .bar { background: color-mix(in srgb, var(--bg) 92%, transparent) } }
 .bar-inner { max-width: var(--wide); height: 100%; margin: auto; padding: 0 40px; display: flex; align-items: center; justify-content: space-between; gap: 16px }
 .brand { display: flex; gap: 10px; align-items: center }
 .soundmark { display: flex; align-items: center; gap: 3px; height: 22px }
@@ -427,15 +429,11 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 }
 
 /* ---------- 时间线头部 ---------- */
-.timeline-section { padding-top: 40px }
-.timeline-head { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 22px; padding: 0 0 22px }
+.timeline-section { padding-top: 56px }
+.timeline-head { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 22px; padding: 0; margin-bottom: 10px; scroll-margin-top: calc(var(--bar) + 36px) }
 .timeline-head::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--ink) }
 .timeline-heading { min-width: 0 }
-.timeline-mast { display: flex; align-items: baseline; justify-content: space-between; gap: 10px 28px; flex-wrap: wrap }
 .timeline-heading h2 { font-family: var(--serif); font-size: 48px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; margin: 0; overflow-wrap: anywhere }
-.text-link.serif.timeline-capsule { font-size: 16px; font-weight: 600; color: var(--ink); min-height: 0; padding: 0; letter-spacing: 0; background-position: left 100% }
-.text-link.serif.timeline-capsule:hover, .text-link.serif.timeline-capsule:focus-visible { color: var(--accent) }
-.timeline-capsule[hidden] { display: none }
 .timeline-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15em .85em; margin: 14px 0 0; min-height: 0 }
 .timeline-stat { display: inline-flex; align-items: baseline; gap: .28em; color: var(--muted) }
 .timeline-stat .num { font-family: var(--display); font-weight: 700; font-size: 32px; line-height: 1; color: var(--accent); font-variant-numeric: lining-nums tabular-nums; letter-spacing: -.02em }
@@ -446,19 +444,21 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 .timeline-lede-wrap::before { content: ""; display: block; flex: 0 0 auto; width: 28px; height: 1px; background: var(--accent); translate: 0 -.15em }
 .timeline-tools { --tool-h: 40px; display: flex; gap: 10px 28px; align-items: center; flex-wrap: nowrap; width: 100% }
 .timeline-toggles { display: flex; align-items: center; gap: 8px 28px; flex: 0 0 auto }
-.search { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: var(--tool-h, 40px); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 2px 0 0; color: var(--muted); font-size: 16px; background: transparent; transition: border-color .25s var(--ease); flex: 1 1 auto; min-width: 16.5rem; width: auto }
-.search:focus-within { border-bottom-color: var(--ink) }
+.search { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: var(--tool-h, 40px); border: 0; border-radius: 0; padding: 0 2px 0 0; color: var(--muted); font-size: 16px; background: transparent; flex: 1 1 auto; min-width: 16.5rem; width: auto }
+.search:focus-within { color: var(--ink) }
 .search input { border: 0; background: transparent; font-size: 14px; width: 100%; min-width: 0; height: 100%; padding: 0; outline: none; color: var(--ink) }
 .search input::placeholder { color: var(--muted) }
 .search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; cursor: pointer; border-radius: 50%; background: #8a8378 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m5 5 6 6M11 5l-6 6' stroke='white' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center / 12px no-repeat }
 .search-key { font-family: var(--mono); font-size: 11px; line-height: 18px; min-width: 20px; text-align: center; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); transition: opacity .2s }
 .search:focus-within .search-key { opacity: 0 }
-@media (hover: none) { .search-key { display: none } }
+@media (hover: none), (max-width: 640px) { .search-key { display: none } }
 .segmented { position: relative; display: inline-grid; grid-template-columns: 1fr 1fr; align-items: stretch; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px) }
 .segmented button { position: relative; z-index: 1; border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--muted); transition: color .3s; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 0 }
-.timeline-tools .segmented { box-sizing: border-box; height: var(--tool-h); flex: 0 0 auto; width: auto; max-width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none }
-.timeline-tools .segmented::before { top: auto; bottom: 0; left: 0; height: 1.5px; width: 50%; border-radius: 0; background: var(--ink) }
-.timeline-tools .segmented button { height: 100%; padding: 0 12px 6px; border-radius: 0; font-size: 13px; letter-spacing: .02em }
+.timeline-tools .segmented { display: inline-flex; box-sizing: border-box; height: var(--tool-h); flex: 0 0 auto; width: auto; max-width: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none }
+.timeline-tools .segmented::before { top: auto; bottom: 0; left: 0; height: 1.5px; width: var(--seg-w, 50%); border-radius: 0; background: var(--ink); transform: translateX(var(--seg-x, 0)) }
+.timeline-tools .segmented:has(#orderOldest[aria-pressed="true"])::before,
+.timeline-tools .segmented:has(#viewWall[aria-pressed="true"])::before { transform: translateX(var(--seg-x, 0)) }
+.timeline-tools .segmented button { height: 100%; padding: 0 12px; border-radius: 0; font-size: 13px; letter-spacing: .02em; min-width: 0 }
 .timeline-tools .segmented button[aria-pressed="true"] { color: var(--ink) }
 .timeline-tools .segmented button:disabled { opacity: .4 }
 .segmented button:active:not(:disabled) { transform: scale(.97) }
@@ -490,7 +490,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 /* ---------- 章节 ---------- */
 .chapter { position: relative; padding-top: 96px; content-visibility: auto; contain-intrinsic-size: auto 1400px }
 .chapter-head { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 36px; align-items: end; margin-bottom: 54px }
-.chapter-numeral { font-family: var(--display); font-weight: 700; font-size: clamp(110px, 13vw, 176px); line-height: .8; letter-spacing: -.05em; padding-right: .04em; color: color-mix(in srgb, var(--ink) 5%, transparent); -webkit-text-stroke: 1px color-mix(in srgb, var(--ink) 34%, transparent); font-variant-numeric: lining-nums; user-select: none }
+.chapter-numeral { font-family: var(--display); font-weight: 700; font-size: clamp(110px, 13vw, 176px); line-height: .8; letter-spacing: -.05em; padding-right: .08em; color: color-mix(in srgb, var(--ink) 6%, transparent); -webkit-text-stroke: 1.25px color-mix(in srgb, var(--ink) 42%, transparent); paint-order: stroke fill; font-variant-numeric: lining-nums; user-select: none }
 @supports (animation-timeline: view()) {
   @media (prefers-reduced-motion: no-preference) {
     .motion .chapter-numeral { animation: numeral-drift linear both; animation-timeline: view(); animation-range: cover 0% cover 100% }
@@ -505,7 +505,7 @@ main { max-width: var(--wide); margin: auto; padding: 0 40px }
 
 /* ---------- 日子与歌曲 ---------- */
 .days { list-style: none; margin: 0; padding: 0 }
-.day { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 0 8px; padding-bottom: 36px }
+.day { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 0 8px; padding-bottom: 36px }
 .day-label { position: sticky; top: calc(var(--bar) + 20px); align-self: start; display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: baseline; padding-top: 4px }
 .day-num { grid-row: span 2; font-family: var(--display); font-weight: 700; font-size: 48px; line-height: .95; letter-spacing: -.03em; font-variant-numeric: lining-nums; min-width: 1.1em }
 .day-meta { font-size: 13px; color: var(--ink-2); line-height: 1.4; white-space: nowrap }
@@ -678,7 +678,6 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
 @media (max-width: 1100px) {
   .bar-inner, main { padding-left: 28px; padding-right: 28px }
   .timeline-body { grid-template-columns: minmax(0, 1fr) 112px; gap: 36px }
-  .day { grid-template-columns: 128px minmax(0, 1fr) }
   .hero, .hero.has-highlights { grid-template-columns: minmax(0, 1fr); gap: 40px; min-height: 0; padding-bottom: 40px }
   .hero::before { right: -30%; top: 30% }
   /* 窄屏：轮播变成开场下方的一张横向卡片 */
@@ -899,13 +898,13 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   .intro-title { font-size: 25px }
   .intro-steps li { padding: 20px 20px 18px }
   .step-num { font-size: 32px }
-  .timeline-section { padding-top: 16px }
-  .timeline-head { gap: 18px; padding: 0 0 16px }
+  .timeline-section { padding-top: 32px }
+  .timeline-head { gap: 18px; padding: 0; scroll-margin-top: calc(var(--bar) + 28px) }
   .timeline-heading h2 { font-size: 34px }
   .timeline-meta { margin-top: 10px }
   .timeline-stat .num { font-size: 26px }
   .timeline-lede-wrap { margin-top: 10px }
-  .timeline-tools { flex-wrap: wrap; gap: 8px 16px }
+  .timeline-tools { flex-wrap: wrap; gap: 12px 16px }
   .timeline-tools .search, .timeline-tools .search:focus-within { flex: 1 1 100%; min-width: 0; width: 100% }
   .timeline-toggles { width: 100%; justify-content: space-between }
   .scrubber { margin: 0 -18px; padding: 9px 18px }
@@ -976,7 +975,7 @@ dialog.sheet { margin: 0 0 0 auto; width: 440px; max-width: 100%; height: 100%; 
   @keyframes copy-line-in { from { opacity: .001 } to { opacity: 1 } }
   @keyframes copy-out { to { opacity: 0; transform: translateY(-.2em) } }
 }
-.timeline-lede { margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.6; color: var(--ink-2); letter-spacing: .02em; max-width: 36em }
+.timeline-lede { margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.6; color: var(--ink-2); letter-spacing: .02em; max-width: 36em; word-break: keep-all; line-break: strict; text-wrap: pretty }
 @media (max-width: 640px) {
   /* 轮换文案会按最长一行占位，窄屏上一行正文下面会空出一块。可见行自己决定高度。 */
   .timeline-lede.rot .rot-v:not(.is-on):not(.is-out) { position: absolute; width: 100%; inset: 0 auto auto 0; pointer-events: none }
@@ -1599,7 +1598,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 }
 
 /* 封面墙：每个月一面方形封面拼贴，日期压在当天第一张上 */
-.view-toggle button { min-width: 4.6em }
+.view-toggle button { min-width: 0 }
 .view-toggle button:disabled { opacity: .45; cursor: default }
 .wall { list-style: none; margin: 0 0 56px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 14px }
 .wall > li { min-width: 0 }
@@ -1636,7 +1635,7 @@ dialog.travel::backdrop { background: #0c0b0a; backdrop-filter: none; -webkit-ba
 @media (max-width: 640px) {
   /* 排序和显示方式并排一行，标签不折字 */
   .timeline-toggles .segmented { flex: 0 0 auto; min-width: max-content }
-  .timeline-toggles .segmented button { padding: 0 10px 6px }
+  .timeline-toggles .segmented button { padding: 0 10px }
 }
 .timeline.is-wall .chapter { contain-intrinsic-size: auto 760px }
 @media (max-width: 640px) {
