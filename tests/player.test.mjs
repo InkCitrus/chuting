@@ -78,7 +78,7 @@ function mount() {
   const dialogClasses = classes()
   const root = { classList: rootClasses }
   const dialog = { open: false, classList: dialogClasses }
-  const play = { disabled: false, label: '', setAttribute(key, value) { if (key === 'aria-label') this.label = value }, addEventListener() {} }
+  const play = { disabled: false, label: '', setAttribute(key, value) { if (key === 'aria-label') this.label = value }, addEventListener(type, fn) { (this._on ||= {})[type] = fn }, click() { return this._on?.click?.() } }
   const seek = { value: '0', disabled: false, addEventListener() {} }
   const scrub = { style: { setProperty() {} } }
   const cur = { textContent: '0:00' }, dur = { textContent: '0:00' }
@@ -672,6 +672,64 @@ test('resume() for a song the player is not holding loads that song', async () =
     assert.equal(result.song_id, 'g')
     assert.equal(player.current.song_id, 'g')
     assert.ok(env.audio().src.includes('/g.mp3'))
+  } finally {
+    env.restore()
+  }
+})
+
+test('showing another song in the dialog does not cut the track that is already playing', async () => {
+  const env = install()
+  try {
+    const { els, mini, rootClasses, dialogClasses } = mount()
+    const asked = []
+    const player = createPlayer({
+      els, mini,
+      getUrl: async (e) => { asked.push(e.song_id); return okUrl(e.song_id) },
+      coverFor: () => null, onEnded() {}, onOpen() {}
+    })
+    const a = { song_id: 'a', name: 'Fixture A', artists: 'Demo' }
+    const b = { song_id: 'b', name: 'Fixture B', artists: 'Demo' }
+
+    // Nothing is playing: browsing a song only updates what is shown.
+    player.show(b)
+    assert.equal(player.current, null)
+    assert.equal(player.playing, false)
+    assert.equal(asked.length, 0)
+    assert.equal(els.play.label, '播放')
+    assert.equal(rootClasses.has('is-playing'), false)
+    assert.equal(dialogClasses.has('is-playing'), false)
+
+    player.show(a)
+    await player.play(a)
+    assert.equal(player.current.song_id, 'a')
+    assert.equal(player.playing, true)
+    assert.ok(env.audio().src.includes('/a.mp3'))
+    assert.equal(els.play.label, '暂停')
+    assert.equal(rootClasses.has('is-playing'), true)
+    const src = env.audio().src
+    const t = env.audio().currentTime
+    const asks = asked.slice()
+
+    player.show(b)
+    assert.equal(player.current.song_id, 'a')
+    assert.equal(player.playing, true)
+    assert.equal(env.audio().src, src)
+    assert.equal(env.audio().paused, false)
+    assert.equal(env.audio().currentTime, t)
+    assert.deepEqual(asked, asks)
+    // The detail play button is for the song on screen, not the one still playing.
+    assert.equal(els.play.label, '播放')
+    assert.equal(rootClasses.has('is-playing'), false)
+    assert.equal(dialogClasses.has('is-playing'), false)
+
+    const job = els.play.click()
+    const result = await job
+    assert.equal(result.song_id, 'b')
+    assert.equal(player.current.song_id, 'b')
+    assert.equal(player.playing, true)
+    assert.ok(env.audio().src.includes('/b.mp3'))
+    assert.equal(els.play.label, '暂停')
+    assert.equal(rootClasses.has('is-playing'), true)
   } finally {
     env.restore()
   }

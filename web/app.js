@@ -1054,10 +1054,10 @@ function observe(instant = false) {
 }
 
 /* ---------- 歌曲详情 ---------- */
-function fillSong(event, follow = false) {
+function fillSong(event) {
   state.current = event.index
   $('player').hidden = !(state.local && state.account)
-  player?.show(event, { follow })
+  player?.show(event)
   const cover = $('detailCover'), label = $('detailLabel')
   tint(cover, event)
   $('detailGlyph').textContent = glyph(event.name)
@@ -1118,7 +1118,7 @@ function stepSong(delta) {
   if (!next) return
   const art = $('detailArt')
   if (motion) { art.classList.remove('swap'); void art.offsetWidth; art.classList.add('swap') }
-  fillSong(next, true) // if a song is playing, the next one follows
+  fillSong(next)
 }
 
 /* ---------- 时间线定位 ---------- */
